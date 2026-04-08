@@ -1,0 +1,67 @@
+{
+  "name": "cornershop",
+  "version": "1.0.0",
+  "description": "Desktop POS and inventory management for small grocery shops",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --enable-logging",
+    "rebuild": "electron-rebuild -f -w better-sqlite3",
+    "build:win": "electron-builder --win --x64",
+    "build:mac": "electron-builder --mac",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.8.0"
+  },
+  "devDependencies": {
+    "electron": "^29.1.0",
+    "electron-builder": "^24.13.3",
+    "electron-rebuild": "^3.2.9"
+  },
+  "build": {
+    "appId": "com.cornershop.app",
+    "productName": "CornerShop",
+    "copyright": "Copyright © 2024 CornerShop",
+    "directories": {
+      "output": "dist",
+      "buildResources": "assets"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "renderer/**/*",
+      "node_modules/**/*",
+      "!node_modules/*/{CHANGELOG.md,README.md,readme.md,README}",
+      "!node_modules/*/{test,__tests__,tests,example,examples}",
+      "!node_modules/.bin",
+      "!**/*.map"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "CornerShop",
+      "installerHeaderIcon": "assets/icon.ico",
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico"
+    },
+    "npmRebuild": true
+  }
+}

@@ -35,6 +35,9 @@ const Settings = {
     ])
 
     const currentCode = (settingsRes.success && settingsRes.settings.currency_code) ? settingsRes.settings.currency_code : 'PKR'
+    const currentPrintMode = (settingsRes.success && settingsRes.settings.print_mode) ? settingsRes.settings.print_mode : 'dialog'
+    const currentShopName = (settingsRes.success && settingsRes.settings.shop_name) ? settingsRes.settings.shop_name : ''
+    const currentShopAddress = (settingsRes.success && settingsRes.settings.shop_address) ? settingsRes.settings.shop_address : ''
 
     const options = Settings.currencies
       .map(c => `<option value="${c.code}" ${c.code === currentCode ? 'selected' : ''}>${c.code} &mdash; ${c.name} (${c.symbol})</option>`)
@@ -77,10 +80,31 @@ const Settings = {
 
       <div class="card settings-card">
         <div class="settings-section">
+          <h3 class="settings-section-title">Shop Information</h3>
+          <p class="settings-section-desc">This name and address will appear at the top of every printed receipt.</p>
+
+          <div class="form-group">
+            <label for="shop-name-input">Shop Name</label>
+            <input type="text" id="shop-name-input" class="form-control" value="${currentShopName}" placeholder="e.g. Al-Noor General Store">
+          </div>
+
+          <div class="form-group">
+            <label for="shop-address-input">Shop Address</label>
+            <input type="text" id="shop-address-input" class="form-control" value="${currentShopAddress}" placeholder="e.g. Shop 4, Main Bazaar, Lahore">
+          </div>
+
+          <button class="btn btn-primary" onclick="Settings.saveShopInfo()">
+            Save Shop Info
+          </button>
+        </div>
+      </div>
+
+      <div class="card settings-card">
+        <div class="settings-section">
           <h3 class="settings-section-title">Currency</h3>
           <p class="settings-section-desc">Choose the currency used across the app — POS, receipts, reports, and inventory.</p>
 
-          <div class="form-group" style="max-width: 380px; margin-top: 1.25rem;">
+          <div class="form-group">
             <label for="currency-select">Currency</label>
             <select id="currency-select" class="form-control">
               ${options}
@@ -89,20 +113,39 @@ const Settings = {
 
           <div class="settings-preview" id="currency-preview"></div>
 
-          <button class="btn btn-primary" style="margin-top: 1.5rem;" onclick="Settings.saveCurrency()">
+          <button class="btn btn-primary" onclick="Settings.saveCurrency()">
             Save Currency
           </button>
         </div>
       </div>
 
-      <div class="card settings-card" style="margin-top: 1.25rem;">
+      <div class="card settings-card">
+        <div class="settings-section">
+          <h3 class="settings-section-title">Printing</h3>
+          <p class="settings-section-desc">Choose how receipts are sent to the printer.</p>
+
+          <div class="form-group">
+            <label for="print-mode-select">Print Mode</label>
+            <select id="print-mode-select" class="form-control">
+              <option value="dialog" ${currentPrintMode === 'dialog' ? 'selected' : ''}>Show print dialog (choose printer each time)</option>
+              <option value="silent" ${currentPrintMode === 'silent' ? 'selected' : ''}>Silent (send directly to default printer)</option>
+            </select>
+          </div>
+
+          <button class="btn btn-primary" onclick="Settings.savePrintMode()">
+            Save Print Settings
+          </button>
+        </div>
+      </div>
+
+      <div class="card settings-card">
         <div class="settings-section">
           <h3 class="settings-section-title">License</h3>
           <p class="settings-section-desc">Activate a license key to use CornerShop beyond the 3-month trial.</p>
 
           ${licenseStatusHTML}
 
-          <div class="form-group" style="max-width: 380px; margin-top: 1.25rem;">
+          <div class="form-group">
             <label for="settings-license-input">License Key</label>
             <input type="text" id="settings-license-input" class="form-control"
               placeholder="CS-YYYYMMDD-XXXXXXXX" autocomplete="off" spellcheck="false">
@@ -147,6 +190,18 @@ const Settings = {
     `
   },
 
+  async saveShopInfo() {
+    const name = document.getElementById('shop-name-input').value.trim()
+    const address = document.getElementById('shop-address-input').value.trim()
+    if (!name) { App.showToast('Shop name cannot be empty', 'error'); return }
+    const res = await window.api.settings.set({ shop_name: name, shop_address: address })
+    if (res.success) {
+      App.showToast('Shop info saved', 'success')
+    } else {
+      App.showToast('Failed to save shop info', 'error')
+    }
+  },
+
   async saveCurrency() {
     const select = document.getElementById('currency-select')
     const currency = Settings.currencies.find(c => c.code === select.value)
@@ -163,6 +218,16 @@ const Settings = {
       App.showToast(`Currency set to ${currency.name} (${currency.symbol})`, 'success')
     } else {
       App.showToast('Failed to save settings', 'error')
+    }
+  },
+
+  async savePrintMode() {
+    const select = document.getElementById('print-mode-select')
+    const res = await window.api.settings.set({ print_mode: select.value })
+    if (res.success) {
+      App.showToast(select.value === 'silent' ? 'Silent print enabled' : 'Print dialog enabled', 'success')
+    } else {
+      App.showToast('Failed to save print settings', 'error')
     }
   },
 

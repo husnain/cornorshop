@@ -1256,6 +1256,19 @@ select { cursor: pointer; }
 .settings-card {
   max-width: 560px;
 }
+.settings-card + .settings-card {
+  margin-top: 1.25rem;
+}
+.settings-section {
+  padding: 1.5rem;
+}
+.settings-section .form-group {
+  max-width: 380px;
+  margin-top: 1.25rem;
+}
+.settings-section > .btn {
+  margin-top: 1.25rem;
+}
 .settings-section-title {
   font-size: 1.1rem;
   font-weight: 600;

@@ -31,6 +31,7 @@ function initDatabase(dbPath) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       sku TEXT UNIQUE,
+      barcode TEXT,
       category_id INTEGER REFERENCES categories(id),
       purchase_price REAL NOT NULL DEFAULT 0,
       selling_price REAL NOT NULL DEFAULT 0,
@@ -100,10 +101,18 @@ function initDatabase(dbPath) {
     );
   `)
 
+  // Migration: add barcode column for existing databases
+  // SQLite ALTER TABLE ADD COLUMN does not allow UNIQUE — add plain column then create index separately
+  try { db.exec('ALTER TABLE products ADD COLUMN barcode TEXT') } catch (_) {}
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode) WHERE barcode IS NOT NULL')
+
   // Seed default settings (INSERT OR IGNORE — won't overwrite existing values)
   db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('currency_code', 'PKR')").run()
   db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('currency_symbol', '₨')").run()
   db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('currency_name', 'Pakistani Rupee')").run()
+  db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('print_mode', 'dialog')").run()
+  db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('shop_name', 'CornerShop')").run()
+  db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('shop_address', '')").run()
 
   // Record trial start date on very first run (never overwrite)
   const trialRow = db.prepare("SELECT value FROM settings WHERE key = 'trial_start'").get()

@@ -23,7 +23,11 @@ const POS = {
         <!-- Left: Products -->
         <div class="pos-products">
           <div class="pos-products-header">
-            <input type="search" id="pos-search" placeholder="Search products by name or SKU..." style="width:100%">
+            <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
+              <span style="font-size:18px;flex-shrink:0">📷</span>
+              <input type="text" id="pos-barcode" placeholder="Scan barcode or type & press Enter" style="flex:1;font-family:monospace;background:var(--surface);border:2px solid var(--primary);border-radius:6px;padding:8px 12px;font-size:14px;color:var(--text)">
+            </div>
+            <input type="search" id="pos-search" placeholder="Search products by name, SKU or barcode..." style="width:100%">
           </div>
           <div class="pos-products-grid" id="pos-product-grid">
           </div>
@@ -136,13 +140,62 @@ const POS = {
     })
   },
 
+  async _submitBarcode(barcodeInput) {
+    const barcode = barcodeInput.value.trim()
+    if (!barcode) return
+
+    const res = await window.api.products.getByBarcode(barcode)
+    if (res.success) {
+      POS.addToCart(res.product)
+      barcodeInput.value = ''
+      return
+    }
+
+    const match = POS.products.find(p => p.barcode === barcode)
+    if (match) {
+      POS.addToCart(match)
+      barcodeInput.value = ''
+      return
+    }
+
+    App.showToast(`No product found for barcode: ${barcode}`, 'error')
+    barcodeInput.select()
+  },
+
   attachEvents() {
+    // Barcode scanner input — auto-adds on scan (fast input), Enter still works for manual typing
+    const barcodeInput = document.getElementById('pos-barcode')
+    let scanTimer = null
+    let scanStartTime = null
+
+    barcodeInput.addEventListener('keydown', (e) => {
+      if (!scanStartTime) scanStartTime = Date.now()
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        clearTimeout(scanTimer)
+        scanStartTime = null
+        POS._submitBarcode(barcodeInput)
+      }
+    })
+
+    barcodeInput.addEventListener('input', () => {
+      clearTimeout(scanTimer)
+      if (!barcodeInput.value.trim()) { scanStartTime = null; return }
+      scanTimer = setTimeout(() => {
+        const elapsed = Date.now() - (scanStartTime || Date.now())
+        scanStartTime = null
+        // Scanners complete in <50ms; treat <100ms as a scan → auto-add
+        if (elapsed < 100) POS._submitBarcode(barcodeInput)
+      }, 80)
+    })
+
     document.getElementById('pos-search').addEventListener('input', (e) => {
       const q = e.target.value.toLowerCase().trim()
       if (q) {
         POS.filteredProducts = POS.products.filter(p =>
           p.name.toLowerCase().includes(q) ||
-          (p.sku && p.sku.toLowerCase().includes(q))
+          (p.sku && p.sku.toLowerCase().includes(q)) ||
+          (p.barcode && p.barcode.toLowerCase().includes(q))
         )
       } else {
         POS.filteredProducts = [...POS.products]
@@ -501,12 +554,19 @@ const POS = {
     `
 
     App.showModal(`Receipt #${sale.id}`, body, footer, { size: 'sm' })
-    POS._lastSale = sale
+    POS._lastSale = { ...sale, items }
   },
 
   async printReceipt(saleId) {
+    const sale = POS._lastSale && POS._lastSale.id === saleId ? POS._lastSale : null
+    if (sale) {
+      await window.api.receipt.print(sale)
+      App.closeModal()
+      return
+    }
     const res = await window.api.sales.getById(saleId)
     if (!res.success) { App.showToast('Failed to load sale for printing', 'error'); return }
     await window.api.receipt.print(res.sale)
+    App.closeModal()
   }
 }

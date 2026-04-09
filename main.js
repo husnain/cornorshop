@@ -86,11 +86,11 @@ ipcMain.handle('products:getAll', wrap(() => {
 }))
 
 ipcMain.handle('products:create', wrap((data) => {
-  const { name, sku, category_id, purchase_price, selling_price, stock_quantity, unit, low_stock_threshold } = data
+  const { name, sku, barcode, category_id, purchase_price, selling_price, stock_quantity, unit, low_stock_threshold } = data
   const result = db.prepare(`
-    INSERT INTO products (name, sku, category_id, purchase_price, selling_price, stock_quantity, unit, low_stock_threshold)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(name, sku || null, category_id || null, purchase_price || 0, selling_price || 0, stock_quantity || 0, unit || 'pcs', low_stock_threshold || 10)
+    INSERT INTO products (name, sku, barcode, category_id, purchase_price, selling_price, stock_quantity, unit, low_stock_threshold)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(name, sku || null, barcode || null, category_id || null, purchase_price || 0, selling_price || 0, stock_quantity || 0, unit || 'pcs', low_stock_threshold || 10)
   const product = db.prepare(`
     SELECT p.*, c.name AS category_name
     FROM products p
@@ -101,13 +101,13 @@ ipcMain.handle('products:create', wrap((data) => {
 }))
 
 ipcMain.handle('products:update', wrap((data) => {
-  const { id, name, sku, category_id, purchase_price, selling_price, stock_quantity, unit, low_stock_threshold } = data
+  const { id, name, sku, barcode, category_id, purchase_price, selling_price, stock_quantity, unit, low_stock_threshold } = data
   db.prepare(`
     UPDATE products
-    SET name = ?, sku = ?, category_id = ?, purchase_price = ?, selling_price = ?,
+    SET name = ?, sku = ?, barcode = ?, category_id = ?, purchase_price = ?, selling_price = ?,
         stock_quantity = ?, unit = ?, low_stock_threshold = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
-  `).run(name, sku || null, category_id || null, purchase_price || 0, selling_price || 0, stock_quantity || 0, unit || 'pcs', low_stock_threshold || 10, id)
+  `).run(name, sku || null, barcode || null, category_id || null, purchase_price || 0, selling_price || 0, stock_quantity || 0, unit || 'pcs', low_stock_threshold || 10, id)
   const product = db.prepare(`
     SELECT p.*, c.name AS category_name
     FROM products p
@@ -133,10 +133,21 @@ ipcMain.handle('products:search', wrap((query) => {
     SELECT p.*, c.name AS category_name
     FROM products p
     LEFT JOIN categories c ON p.category_id = c.id
-    WHERE p.name LIKE ? OR p.sku LIKE ?
+    WHERE p.name LIKE ? OR p.sku LIKE ? OR p.barcode LIKE ?
     ORDER BY p.name ASC
-  `).all(like, like)
+  `).all(like, like, like)
   return { success: true, products }
+}))
+
+ipcMain.handle('products:getByBarcode', wrap((barcode) => {
+  const product = db.prepare(`
+    SELECT p.*, c.name AS category_name
+    FROM products p
+    LEFT JOIN categories c ON p.category_id = c.id
+    WHERE p.barcode = ?
+  `).get(barcode)
+  if (!product) return { success: false, error: 'Product not found' }
+  return { success: true, product }
 }))
 
 // ─── Categories ───────────────────────────────────────────────────────────────
@@ -530,20 +541,28 @@ ipcMain.handle('settings:set', wrap((data) => {
 // ─── Receipt ──────────────────────────────────────────────────────────────────
 ipcMain.handle('receipt:print', wrap((saleData) => {
   const { BrowserWindow } = require('electron')
+  const os  = require('os')
+  const path = require('path')
+  const fs  = require('fs')
 
   const settingsRows = db.prepare('SELECT key, value FROM settings').all()
   const settings = {}
   for (const row of settingsRows) settings[row.key] = row.value
   const currencySymbol = settings.currency_symbol || '₨'
+  const shopName = settings.shop_name || 'CornerShop'
+  const shopAddress = settings.shop_address || ''
+  const silent = (settings.print_mode || 'dialog') === 'silent'
   const formatCurrency = (n) => `${currencySymbol}${Number(n || 0).toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   const formatDate = (d) => new Date(d).toLocaleString()
 
-  const itemRows = (saleData.items || []).map(item => `
+  const items = saleData.items || []
+
+  const itemRows = items.map(item => `
     <tr>
-      <td>${item.product_name}</td>
-      <td style="text-align:center">${item.quantity}</td>
-      <td style="text-align:right">${formatCurrency(item.unit_price)}</td>
-      <td style="text-align:right">${formatCurrency(item.total_price)}</td>
+      <td class="col-name">${item.product_name}</td>
+      <td class="col-qty">${item.quantity}</td>
+      <td class="col-price">${formatCurrency(item.unit_price)}</td>
+      <td class="col-total">${formatCurrency(item.total_price)}</td>
     </tr>
   `).join('')
 
@@ -553,71 +572,107 @@ ipcMain.handle('receipt:print', wrap((saleData) => {
 <meta charset="UTF-8">
 <title>Receipt</title>
 <style>
+  @page { margin: 0; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: 'Courier New', monospace; font-size: 12px; width: 300px; padding: 10px; color: #000; }
+  body { font-family: 'Courier New', Courier, monospace; font-size: 11px; width: 72mm; padding: 4mm; color: #000; }
   .center { text-align: center; }
-  .shop-name { font-size: 20px; font-weight: bold; margin-bottom: 2px; }
-  .divider { border-top: 1px dashed #000; margin: 8px 0; }
-  table { width: 100%; border-collapse: collapse; }
-  th { text-align: left; font-size: 11px; border-bottom: 1px solid #000; padding-bottom: 4px; }
-  td { padding: 2px 0; vertical-align: top; }
-  .totals td { padding: 2px 0; }
-  .totals .label { font-weight: normal; }
-  .totals .grand-total td { font-weight: bold; font-size: 14px; border-top: 1px solid #000; padding-top: 4px; }
-  .thank-you { margin-top: 12px; font-size: 11px; }
+  .shop-name { font-size: 16px; font-weight: bold; margin-bottom: 2px; }
+  .divider { border-top: 1px dashed #000; margin: 6px 0; }
+  .meta { font-size: 10px; line-height: 1.5; }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  .items-table .col-name  { width: 46%; word-break: break-word; }
+  .items-table .col-qty   { width: 10%; text-align: center; }
+  .items-table .col-price { width: 22%; text-align: right; }
+  .items-table .col-total { width: 22%; text-align: right; }
+  th { font-size: 10px; border-bottom: 1px solid #000; padding-bottom: 3px; text-align: left; }
+  th.col-qty   { text-align: center; }
+  th.col-price, th.col-total { text-align: right; }
+  td { padding: 2px 0; vertical-align: top; font-size: 11px; }
+  .totals-table .lbl { width: 60%; }
+  .totals-table .amt { width: 40%; text-align: right; }
+  .grand-total td { font-weight: bold; font-size: 13px; border-top: 1px solid #000; padding-top: 3px; }
+  .thank-you { margin-top: 10px; font-size: 10px; text-align: center; }
+  .install-footer { margin-top: 8px; font-size: 9px; text-align: center; color: #555; }
 </style>
 </head>
 <body>
 <div class="center">
-  <div class="shop-name">CornerShop</div>
-  <div>Your Neighborhood Grocery</div>
+  <div class="shop-name">${shopName}</div>
+  ${shopAddress ? `<div>${shopAddress}</div>` : ''}
 </div>
 <div class="divider"></div>
-<div>Receipt #: ${saleData.id}</div>
-<div>Date: ${formatDate(saleData.sale_date)}</div>
-<div>Cashier: ${saleData.cashier_name || 'N/A'}</div>
+<div class="meta">
+  <div>Receipt #: ${saleData.id}</div>
+  <div>Date: ${formatDate(saleData.sale_date)}</div>
+  <div>Cashier: ${saleData.cashier_name || 'N/A'}</div>
+</div>
 <div class="divider"></div>
-<table>
+<table class="items-table">
   <thead>
     <tr>
-      <th>Item</th>
-      <th style="text-align:center">Qty</th>
-      <th style="text-align:right">Price</th>
-      <th style="text-align:right">Total</th>
+      <th class="col-name">Item</th>
+      <th class="col-qty">Qty</th>
+      <th class="col-price">Price</th>
+      <th class="col-total">Total</th>
     </tr>
   </thead>
-  <tbody>
-    ${itemRows}
-  </tbody>
+  <tbody>${itemRows}</tbody>
 </table>
 <div class="divider"></div>
-<table class="totals">
-  <tr><td class="label">Subtotal</td><td style="text-align:right">${formatCurrency(saleData.subtotal)}</td></tr>
-  ${saleData.discount > 0 ? `<tr><td class="label">Discount</td><td style="text-align:right">-${formatCurrency(saleData.discount)}</td></tr>` : ''}
-  <tr class="grand-total"><td><strong>TOTAL</strong></td><td style="text-align:right"><strong>${formatCurrency(saleData.total)}</strong></td></tr>
-  <tr><td class="label">Payment (${(saleData.payment_method || 'cash').toUpperCase()})</td><td style="text-align:right">${formatCurrency(saleData.amount_paid)}</td></tr>
-  <tr><td class="label">Change</td><td style="text-align:right">${formatCurrency(saleData.change_amount)}</td></tr>
+<table class="totals-table">
+  <tr><td class="lbl">Subtotal</td><td class="amt">${formatCurrency(saleData.subtotal)}</td></tr>
+  ${saleData.discount > 0 ? `<tr><td class="lbl">Discount</td><td class="amt">-${formatCurrency(saleData.discount)}</td></tr>` : ''}
+  <tr class="grand-total"><td class="lbl">TOTAL</td><td class="amt">${formatCurrency(saleData.total)}</td></tr>
+  <tr><td class="lbl">Payment (${(saleData.payment_method || 'cash').toUpperCase()})</td><td class="amt">${formatCurrency(saleData.amount_paid)}</td></tr>
+  <tr><td class="lbl">Change</td><td class="amt">${formatCurrency(saleData.change_amount)}</td></tr>
 </table>
 <div class="divider"></div>
-<div class="center thank-you">
+<div class="thank-you">
   <p>Thank you for shopping at CornerShop!</p>
   <p>Please come again.</p>
+</div>
+<div class="divider"></div>
+<div class="install-footer">
+  <p>Get this app: 0333-121-1992</p>
 </div>
 </body>
 </html>`
 
+  const tmpFile = path.join(os.tmpdir(), `receipt-${saleData.id}-${Date.now()}.html`)
+  fs.writeFileSync(tmpFile, html, 'utf-8')
+
+
+  // 80mm at 96 DPI = 302px — match print width so scrollHeight reflects actual print layout
+  const printWidthPx = 302
   const win = new BrowserWindow({
-    width: 380,
-    height: 600,
-    show: false,
+    width: printWidthPx,
+    height: 2000,
+    show: !silent,
     webPreferences: { nodeIntegration: false, contextIsolation: true }
   })
 
-  win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
+  win.loadFile(tmpFile)
   win.webContents.once('did-finish-load', () => {
-    win.webContents.print({ silent: false, printBackground: false }, () => {
-      win.close()
-    })
+    setTimeout(() => {
+      win.webContents.executeJavaScript('document.body.offsetHeight').then(scrollHeight => {
+        win.setSize(printWidthPx, scrollHeight + 40)
+        // 1 CSS px = 1/96 inch = 264.583 µm; add 15mm (15000 µm) safety margin
+        const pageHeightMicrons = Math.ceil(scrollHeight * 265) + 15000
+        win.webContents.print({
+          silent,
+          printBackground: true,
+          pageSize: { width: 80000, height: pageHeightMicrons }
+        }, () => {
+          try { fs.unlinkSync(tmpFile) } catch (_) {}
+          setTimeout(() => win.close(), silent ? 0 : 1000)
+        })
+      }).catch(() => {
+        win.webContents.print({ silent, printBackground: true }, () => {
+          try { fs.unlinkSync(tmpFile) } catch (_) {}
+          setTimeout(() => win.close(), silent ? 0 : 1000)
+        })
+      })
+    }, 500)
   })
 
   return { success: true }

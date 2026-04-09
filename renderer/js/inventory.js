@@ -54,6 +54,7 @@ const Inventory = {
             <tr>
               <th>Name</th>
               <th>SKU</th>
+              <th>Barcode</th>
               <th>Category</th>
               <th class="text-right">Purchase Price</th>
               <th class="text-right">Selling Price</th>
@@ -98,7 +99,8 @@ const Inventory = {
       const q = Inventory.searchQuery.toLowerCase()
       products = products.filter(p =>
         p.name.toLowerCase().includes(q) ||
-        (p.sku && p.sku.toLowerCase().includes(q))
+        (p.sku && p.sku.toLowerCase().includes(q)) ||
+        (p.barcode && p.barcode.toLowerCase().includes(q))
       )
     }
 
@@ -109,7 +111,7 @@ const Inventory = {
     if (products.length === 0) {
       tbody.innerHTML = `
         <tr>
-          <td colspan="10" style="text-align:center;padding:40px;color:var(--text-muted)">
+          <td colspan="11" style="text-align:center;padding:40px;color:var(--text-muted)">
             No products found
           </td>
         </tr>
@@ -129,6 +131,7 @@ const Inventory = {
         <tr class="${rowClass}">
           <td><strong>${p.name}</strong></td>
           <td><code style="font-size:12px">${p.sku || '—'}</code></td>
+          <td><code style="font-size:12px">${p.barcode || '—'}</code></td>
           <td>${p.category_name || '—'}</td>
           <td class="text-right">${App.formatCurrency(p.purchase_price)}</td>
           <td class="text-right">${App.formatCurrency(p.selling_price)}</td>
@@ -173,6 +176,18 @@ const Inventory = {
           <div class="form-group">
             <label>SKU</label>
             <input type="text" name="sku" value="${product ? (product.sku || '') : ''}" placeholder="e.g. BEV-001">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Barcode</label>
+            <div style="display:flex;gap:6px;align-items:center">
+              <input type="text" name="barcode" id="barcode-input" value="${product ? (product.barcode || '') : ''}" placeholder="Scan or type barcode" style="font-family:monospace;flex:1">
+              <button type="button" id="btn-scan-barcode" class="btn btn-sm btn-secondary" title="Click then scan with your barcode scanner">📷 Scan</button>
+            </div>
+          </div>
+          <div class="form-group" style="flex:0 0 auto;display:flex;align-items:flex-end">
+            <span id="barcode-scan-status" style="font-size:12px;color:var(--text-muted)"></span>
           </div>
         </div>
         <div class="form-row">
@@ -225,6 +240,22 @@ const Inventory = {
     document.getElementById('btn-save-product').addEventListener('click', async () => {
       await Inventory.saveProduct(id)
     })
+
+    // Scan button: focus barcode input and wait for scanner input (Enter)
+    document.getElementById('btn-scan-barcode').addEventListener('click', () => {
+      const input = document.getElementById('barcode-input')
+      const status = document.getElementById('barcode-scan-status')
+      input.value = ''
+      input.focus()
+      status.textContent = 'Ready to scan...'
+      input.onkeydown = (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          status.textContent = input.value ? `✓ ${input.value}` : ''
+          input.onkeydown = null
+        }
+      }
+    })
   },
 
   async saveProduct(id) {
@@ -234,6 +265,7 @@ const Inventory = {
     const data = {
       name: formData.get('name').trim(),
       sku: formData.get('sku').trim() || null,
+      barcode: formData.get('barcode').trim() || null,
       category_id: formData.get('category_id') ? Number(formData.get('category_id')) : null,
       purchase_price: parseFloat(formData.get('purchase_price')) || 0,
       selling_price: parseFloat(formData.get('selling_price')) || 0,

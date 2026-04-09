@@ -1,20 +1,43 @@
 'use strict'
 
 const crypto = require('crypto')
+const os = require('os')
 
 // Secret used to sign license keys — keep this private
 const SECRET = 'CS@CornerShop#License$2024!Key'
 
 /**
- * Generate a license key that expires on the given date.
+ * Generate a stable fingerprint for the current machine.
+ * Uses hostname + all non-internal MAC addresses.
+ * @returns {string} 16-char hex string, e.g. 'A1B2C3D4E5F60001'
+ */
+function getMachineId() {
+  const interfaces = os.networkInterfaces()
+  const macs = []
+  for (const iface of Object.values(interfaces)) {
+    for (const addr of iface) {
+      if (!addr.internal && addr.mac && addr.mac !== '00:00:00:00:00:00') {
+        macs.push(addr.mac.toUpperCase())
+      }
+    }
+  }
+  macs.sort()
+  const raw = [os.hostname(), ...macs].join('|')
+  return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 16).toUpperCase()
+}
+
+/**
+ * Generate a machine-locked license key that expires on the given date.
  * @param {string} expiryDate - 'YYYY-MM-DD'
+ * @param {string} machineId  - from getMachineId() on the target machine
  * @returns {string} e.g. 'CS-20270409-A1B2C3D4'
  */
-function generateKey(expiryDate) {
+function generateKey(expiryDate, machineId) {
+  if (!machineId) throw new Error('machineId is required')
   const dateStr = expiryDate.replace(/-/g, '') // YYYYMMDD
   const hmac = crypto
     .createHmac('sha256', SECRET)
-    .update(dateStr)
+    .update(dateStr + machineId.trim().toUpperCase())
     .digest('hex')
     .slice(0, 8)
     .toUpperCase()
@@ -22,13 +45,17 @@ function generateKey(expiryDate) {
 }
 
 /**
- * Validate a license key.
+ * Validate a machine-locked license key.
  * @param {string} key
+ * @param {string} machineId - from getMachineId() on the current machine
  * @returns {{ valid: boolean, expiryDate?: string, daysLeft?: number, reason?: string }}
  */
-function validateKey(key) {
+function validateKey(key, machineId) {
   if (!key || typeof key !== 'string') {
     return { valid: false, reason: 'No key provided' }
+  }
+  if (!machineId) {
+    return { valid: false, reason: 'Machine ID unavailable' }
   }
 
   const clean = key.trim().toUpperCase().replace(/\s+/g, '')
@@ -42,13 +69,13 @@ function validateKey(key) {
 
   const expectedHmac = crypto
     .createHmac('sha256', SECRET)
-    .update(dateStr)
+    .update(dateStr + machineId.trim().toUpperCase())
     .digest('hex')
     .slice(0, 8)
     .toUpperCase()
 
   if (keyHmac !== expectedHmac) {
-    return { valid: false, reason: 'Invalid license key' }
+    return { valid: false, reason: 'This license key is not valid for this machine' }
   }
 
   const year  = parseInt(dateStr.slice(0, 4), 10)
@@ -88,4 +115,4 @@ function checkTrial(trialStart) {
   }
 }
 
-module.exports = { generateKey, validateKey, checkTrial }
+module.exports = { getMachineId, generateKey, validateKey, checkTrial }

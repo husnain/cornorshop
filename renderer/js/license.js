@@ -15,6 +15,8 @@ const LicenseScreen = {
       ? new Date(licenseRes.expiryDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
       : 'N/A'
 
+    const machineId = licenseRes.machineId || '—'
+
     msg.innerHTML = `
       <div class="license-info-box">
         <div class="license-info-icon">⏰</div>
@@ -24,6 +26,12 @@ const LicenseScreen = {
         </div>
       </div>
       <p class="license-info-text">Enter your license key below to continue using CornerShop.</p>
+      <div class="license-machine-box">
+        <span class="license-machine-label">Machine ID:</span>
+        <code class="license-machine-id">${machineId}</code>
+        <button class="btn-copy-machine-id" title="Copy Machine ID" onclick="navigator.clipboard.writeText('${machineId}')">Copy</button>
+      </div>
+      <p class="license-info-text" style="font-size:0.8em;color:#888;">Share this Machine ID with support to receive your license key.</p>
     `
 
     // Allow pressing Enter in the input to activate

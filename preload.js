@@ -68,6 +68,7 @@ contextBridge.exposeInMainWorld('api', {
 
   license: {
     check: () => ipcRenderer.invoke('license:check'),
-    activate: (data) => ipcRenderer.invoke('license:activate', data)
+    activate: (data) => ipcRenderer.invoke('license:activate', data),
+    getMachineId: () => ipcRenderer.invoke('license:getMachineId')
   }
 })

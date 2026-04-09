@@ -4,7 +4,7 @@ const { app, BrowserWindow, ipcMain } = require('electron')
 const path = require('path')
 const bcrypt = require('bcryptjs')
 const { initDatabase } = require('./src/database/db')
-const { validateKey, checkTrial } = require('./src/license')
+const { getMachineId, validateKey, checkTrial } = require('./src/license')
 
 let db
 let mainWindow
@@ -485,35 +485,51 @@ ipcMain.handle('users:delete', wrap((id) => {
 }))
 
 // ─── License ──────────────────────────────────────────────────────────────────
+ipcMain.handle('license:getMachineId', wrap(() => {
+  return { success: true, machineId: getMachineId() }
+}))
+
 ipcMain.handle('license:check', wrap(() => {
-  const rows = db.prepare('SELECT key, value FROM settings WHERE key IN (\'trial_start\', \'license_key\')').all()
+  const machineId = getMachineId()
+  const rows = db.prepare('SELECT key, value FROM settings WHERE key IN (\'trial_start\', \'license_key\', \'trial_machine_id\')').all()
   const s = {}
   for (const r of rows) s[r.key] = r.value
 
-  // If a license key is stored, validate it first
+  // If a license key is stored, validate it against this machine
   if (s.license_key) {
-    const result = validateKey(s.license_key)
+    const result = validateKey(s.license_key, machineId)
     if (result.valid) {
       return { success: true, status: 'licensed', daysLeft: result.daysLeft, expiryDate: result.expiryDate }
     }
-    // Key is invalid/expired — fall through to trial check
+    // Key is invalid/expired/wrong machine — fall through to trial check
   }
 
   // Check trial
   if (!s.trial_start) {
-    return { success: true, status: 'expired', reason: 'No trial start date found' }
+    return { success: true, status: 'expired', reason: 'No trial start date found', machineId }
+  }
+
+  // Lock trial to the machine it started on
+  if (s.trial_machine_id && s.trial_machine_id !== machineId) {
+    return { success: true, status: 'expired', reason: 'Trial is locked to another machine', machineId }
+  }
+
+  // Record machine ID when trial first starts
+  if (!s.trial_machine_id) {
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('trial_machine_id', ?)").run(machineId)
   }
 
   const trial = checkTrial(s.trial_start)
   if (trial.active) {
-    return { success: true, status: 'trial', daysLeft: trial.daysLeft, expiryDate: trial.expiryDate }
+    return { success: true, status: 'trial', daysLeft: trial.daysLeft, expiryDate: trial.expiryDate, machineId }
   }
 
-  return { success: true, status: 'expired', daysLeft: 0, expiryDate: trial.expiryDate }
+  return { success: true, status: 'expired', daysLeft: 0, expiryDate: trial.expiryDate, machineId }
 }))
 
 ipcMain.handle('license:activate', wrap(({ key }) => {
-  const result = validateKey(key)
+  const machineId = getMachineId()
+  const result = validateKey(key, machineId)
   if (!result.valid) {
     return { success: false, error: result.reason }
   }

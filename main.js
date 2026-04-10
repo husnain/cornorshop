@@ -1,10 +1,11 @@
 'use strict'
 
-const { app, BrowserWindow, ipcMain } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog } = require('electron')
 const path = require('path')
 const bcrypt = require('bcryptjs')
 const { initDatabase } = require('./src/database/db')
 const { getMachineId, validateKey, checkTrial } = require('./src/license')
+const { autoUpdater } = require('electron-updater')
 
 let db
 let mainWindow
@@ -32,6 +33,25 @@ app.whenReady().then(() => {
   const userDataPath = app.getPath('userData')
   db = initDatabase(path.join(userDataPath, 'cornershop.db'))
   createWindow()
+
+  // Check for updates in production only (not during dev/testing)
+  if (app.isPackaged) {
+    autoUpdater.checkForUpdates()
+  }
+})
+
+autoUpdater.on('update-downloaded', (info) => {
+  dialog.showMessageBox(mainWindow, {
+    type: 'info',
+    title: 'Update Ready',
+    message: `CornerShop ${info.version} has been downloaded and is ready to install.`,
+    detail: 'Click "Restart Now" to apply the update, or "Later" to install it next time you open the app.',
+    buttons: ['Restart Now', 'Later'],
+    defaultId: 0,
+    cancelId: 1
+  }).then(({ response }) => {
+    if (response === 0) autoUpdater.quitAndInstall()
+  })
 })
 
 app.on('window-all-closed', () => {

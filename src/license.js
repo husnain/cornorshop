@@ -3,8 +3,12 @@
 const crypto = require('crypto')
 const os = require('os')
 
-// Secret used to sign license keys — keep this private
-const SECRET = 'CS@CornerShop#License$2024!Key'
+// Only the public key lives in the app — the private key never leaves your machine.
+// Generated with: node tools/genkeys.js
+const PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEHibOxpttGqdOb3wjtQanutXn73mp
+nTmG6XxqV5cdRzR2CzeoqmBr1c1Zh3CfuSL8ZJ8NzGJURMJaTZgttNKcsA==
+-----END PUBLIC KEY-----`
 
 /**
  * Generate a stable fingerprint for the current machine.
@@ -27,70 +31,54 @@ function getMachineId() {
 }
 
 /**
- * Generate a machine-locked license key that expires on the given date.
- * @param {string} expiryDate - 'YYYY-MM-DD'
- * @param {string} machineId  - from getMachineId() on the target machine
- * @returns {string} e.g. 'CS-20270409-A1B2C3D4'
+ * Validate a .lic file payload (JSON object) against the current machine.
+ * @param {object} license - parsed JSON from .lic file: { machineId, expiry, sig }
+ * @param {string} currentMachineId - from getMachineId()
+ * @returns {{ valid: boolean, daysLeft?: number, expiryDate?: string, reason?: string }}
  */
-function generateKey(expiryDate, machineId) {
-  if (!machineId) throw new Error('machineId is required')
-  const dateStr = expiryDate.replace(/-/g, '') // YYYYMMDD
-  const hmac = crypto
-    .createHmac('sha256', SECRET)
-    .update(dateStr + machineId.trim().toUpperCase())
-    .digest('hex')
-    .slice(0, 8)
-    .toUpperCase()
-  return `CS-${dateStr}-${hmac}`
-}
-
-/**
- * Validate a machine-locked license key.
- * @param {string} key
- * @param {string} machineId - from getMachineId() on the current machine
- * @returns {{ valid: boolean, expiryDate?: string, daysLeft?: number, reason?: string }}
- */
-function validateKey(key, machineId) {
-  if (!key || typeof key !== 'string') {
-    return { valid: false, reason: 'No key provided' }
-  }
-  if (!machineId) {
-    return { valid: false, reason: 'Machine ID unavailable' }
+function validateKey(license, currentMachineId) {
+  if (!license || typeof license !== 'object') {
+    return { valid: false, reason: 'Invalid license file' }
   }
 
-  const clean = key.trim().toUpperCase().replace(/\s+/g, '')
-  const match = clean.match(/^CS-(\d{8})-([A-F0-9]{8})$/)
-  if (!match) {
-    return { valid: false, reason: 'Invalid key format' }
+  const { machineId, expiry, sig } = license
+
+  if (!machineId || !expiry || !sig) {
+    return { valid: false, reason: 'License file is missing required fields' }
   }
 
-  const dateStr = match[1]
-  const keyHmac = match[2]
-
-  const expectedHmac = crypto
-    .createHmac('sha256', SECRET)
-    .update(dateStr + machineId.trim().toUpperCase())
-    .digest('hex')
-    .slice(0, 8)
-    .toUpperCase()
-
-  if (keyHmac !== expectedHmac) {
-    return { valid: false, reason: 'This license key is not valid for this machine' }
+  if (machineId.trim().toUpperCase() !== currentMachineId) {
+    return { valid: false, reason: 'This license is not valid for this machine' }
   }
 
-  const year  = parseInt(dateStr.slice(0, 4), 10)
-  const month = parseInt(dateStr.slice(4, 6), 10) - 1
-  const day   = parseInt(dateStr.slice(6, 8), 10)
-  const expiry = new Date(year, month, day, 23, 59, 59, 999)
+  // Verify ECDSA signature — the app can only verify, never forge
+  const message = `${machineId.trim().toUpperCase()}|${expiry}`
+  try {
+    const verify = crypto.createVerify('SHA256')
+    verify.update(message)
+    const ok = verify.verify(PUBLIC_KEY, sig, 'base64')
+    if (!ok) return { valid: false, reason: 'License signature is invalid' }
+  } catch {
+    return { valid: false, reason: 'License verification failed' }
+  }
+
+  // Check expiry date (format: YYYYMMDD)
+  if (!/^\d{8}$/.test(expiry)) {
+    return { valid: false, reason: 'License has an invalid expiry date' }
+  }
+
+  const year  = parseInt(expiry.slice(0, 4), 10)
+  const month = parseInt(expiry.slice(4, 6), 10) - 1
+  const day   = parseInt(expiry.slice(6, 8), 10)
+  const expiryDate = new Date(year, month, day, 23, 59, 59, 999)
 
   const now = new Date()
-  const daysLeft = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24))
-
-  if (now > expiry) {
-    return { valid: false, reason: 'License key has expired', expired: true, expiryDate: expiry.toISOString(), daysLeft: 0 }
+  if (now > expiryDate) {
+    return { valid: false, reason: 'License has expired', expired: true, expiryDate: expiryDate.toISOString(), daysLeft: 0 }
   }
 
-  return { valid: true, expiryDate: expiry.toISOString(), daysLeft }
+  const daysLeft = Math.ceil((expiryDate - now) / (1000 * 60 * 60 * 24))
+  return { valid: true, daysLeft, expiryDate: expiryDate.toISOString() }
 }
 
 /**
@@ -115,4 +103,4 @@ function checkTrial(trialStart) {
   }
 }
 
-module.exports = { getMachineId, generateKey, validateKey, checkTrial }
+module.exports = { getMachineId, validateKey, checkTrial }

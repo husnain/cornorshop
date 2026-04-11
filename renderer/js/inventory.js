@@ -32,7 +32,10 @@ const Inventory = {
           <div class="page-title">Inventory</div>
           <div class="page-subtitle">${Inventory.products.length} products</div>
         </div>
-        <button class="btn btn-primary" id="btn-add-product">+ Add Product</button>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-secondary" id="btn-import-csv">Import CSV</button>
+          <button class="btn btn-primary" id="btn-add-product">+ Add Product</button>
+        </div>
       </div>
 
       <div class="toolbar">
@@ -72,6 +75,7 @@ const Inventory = {
     `
 
     document.getElementById('btn-add-product').addEventListener('click', () => Inventory.showProductModal())
+    document.getElementById('btn-import-csv').addEventListener('click', () => Inventory.showImportModal())
     document.getElementById('inv-search').addEventListener('input', (e) => {
       Inventory.searchQuery = e.target.value
       Inventory.renderTable()
@@ -319,6 +323,320 @@ const Inventory = {
     } else {
       App.showToast(res.error || 'Failed to delete product', 'error')
     }
+  },
+
+  // ─── CSV Import ─────────────────────────────────────────────────────────────
+
+  parseCSV(text) {
+    const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+    const rows = []
+    let i = 0
+
+    while (i < normalized.length) {
+      const fields = []
+      // Parse one row
+      while (i < normalized.length && normalized[i] !== '\n') {
+        if (normalized[i] === '"') {
+          // Quoted field
+          i++ // skip opening quote
+          let field = ''
+          while (i < normalized.length) {
+            if (normalized[i] === '"') {
+              if (normalized[i + 1] === '"') { field += '"'; i += 2 } // escaped quote
+              else { i++; break } // closing quote
+            } else if (normalized[i] === '\n') {
+              // multi-line field
+              field += '\n'; i++
+            } else {
+              field += normalized[i++]
+            }
+          }
+          fields.push(field)
+          if (normalized[i] === ',') i++ // skip comma after field
+        } else {
+          // Unquoted field
+          let field = ''
+          while (i < normalized.length && normalized[i] !== ',' && normalized[i] !== '\n') {
+            field += normalized[i++]
+          }
+          fields.push(field.trim())
+          if (normalized[i] === ',') i++ // skip comma
+        }
+      }
+      if (normalized[i] === '\n') i++ // skip newline
+
+      if (fields.length > 1 || (fields.length === 1 && fields[0] !== '')) {
+        rows.push(fields)
+      }
+    }
+
+    return rows
+  },
+
+  downloadTemplate() {
+    const header = 'name,sku,barcode,category,purchase_price,selling_price,stock_quantity,unit,low_stock_threshold'
+    const example = 'Coca Cola 330ml,BEV-001,5449000000996,Beverages,0.80,1.50,100,pcs,20'
+    const csv = header + '\n' + example + '\n'
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'products_template.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  },
+
+  showImportModal() {
+    const body = `
+      <div id="import-step-upload">
+        <p style="margin-bottom:12px;color:var(--text-muted);font-size:13px">
+          Upload a CSV file to import products in bulk. Existing products with matching SKUs will be updated.
+          New categories are created automatically.
+        </p>
+        <div style="margin-bottom:16px">
+          <button class="btn btn-sm btn-secondary" id="btn-dl-template">Download Template CSV</button>
+        </div>
+        <div id="csv-drop-zone" style="
+          border:2px dashed var(--border);border-radius:8px;padding:32px;text-align:center;
+          cursor:pointer;transition:border-color .2s;background:var(--bg-secondary)
+        ">
+          <div style="font-size:32px;margin-bottom:8px">📂</div>
+          <div style="font-weight:600;margin-bottom:4px">Click or drop CSV file here</div>
+          <div style="font-size:12px;color:var(--text-muted)">Supports files with thousands of products</div>
+          <input type="file" id="csv-file-input" accept=".csv,text/csv" style="display:none">
+        </div>
+        <div id="csv-parse-error" style="display:none;margin-top:12px" class="alert alert-danger"></div>
+      </div>
+
+      <div id="import-step-preview" style="display:none">
+        <div id="import-summary-bar" style="
+          display:flex;gap:16px;padding:12px 16px;background:var(--bg-secondary);
+          border-radius:8px;margin-bottom:16px;font-size:13px;flex-wrap:wrap
+        "></div>
+        <div style="max-height:300px;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead style="position:sticky;top:0;background:var(--bg-secondary)">
+              <tr id="preview-header-row"></tr>
+            </thead>
+            <tbody id="preview-tbody"></tbody>
+          </table>
+        </div>
+        <div id="import-errors-section" style="display:none;margin-top:12px">
+          <div style="font-weight:600;font-size:13px;color:var(--danger);margin-bottom:6px" id="import-errors-title"></div>
+          <div style="max-height:120px;overflow-y:auto;font-size:12px;font-family:monospace;
+            background:var(--bg-secondary);border-radius:6px;padding:8px" id="import-errors-list"></div>
+        </div>
+      </div>
+
+      <div id="import-step-result" style="display:none;text-align:center;padding:24px 0">
+        <div style="font-size:48px;margin-bottom:12px" id="result-icon"></div>
+        <div style="font-size:18px;font-weight:700;margin-bottom:8px" id="result-title"></div>
+        <div style="color:var(--text-muted);font-size:14px" id="result-detail"></div>
+      </div>
+    `
+
+    const footer = `
+      <button class="btn btn-secondary" id="btn-import-cancel">Cancel</button>
+      <button class="btn btn-primary" id="btn-import-confirm" style="display:none">Import Products</button>
+      <button class="btn btn-primary" id="btn-import-done" style="display:none">Done</button>
+    `
+
+    App.showModal('Import Products from CSV', body, footer, { size: 'lg' })
+
+    // Parsed rows ready for import
+    let pendingRows = []
+
+    document.getElementById('btn-import-cancel').addEventListener('click', () => App.closeModal())
+    document.getElementById('btn-dl-template').addEventListener('click', () => Inventory.downloadTemplate())
+
+    // File input via click on drop zone
+    const dropZone = document.getElementById('csv-drop-zone')
+    const fileInput = document.getElementById('csv-file-input')
+
+    dropZone.addEventListener('click', () => fileInput.click())
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault()
+      dropZone.style.borderColor = 'var(--primary)'
+    })
+    dropZone.addEventListener('dragleave', () => {
+      dropZone.style.borderColor = 'var(--border)'
+    })
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault()
+      dropZone.style.borderColor = 'var(--border)'
+      const file = e.dataTransfer.files[0]
+      if (file) handleFile(file)
+    })
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files[0]) handleFile(fileInput.files[0])
+    })
+
+    function handleFile(file) {
+      if (!file.name.endsWith('.csv') && file.type !== 'text/csv') {
+        showParseError('Please select a .csv file.')
+        return
+      }
+
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        try {
+          processCSV(e.target.result)
+        } catch (err) {
+          showParseError('Failed to parse CSV: ' + err.message)
+        }
+      }
+      reader.onerror = () => showParseError('Failed to read file.')
+      reader.readAsText(file, 'UTF-8')
+    }
+
+    function showParseError(msg) {
+      const el = document.getElementById('csv-parse-error')
+      el.textContent = msg
+      el.style.display = 'block'
+    }
+
+    function processCSV(text) {
+      document.getElementById('csv-parse-error').style.display = 'none'
+
+      const allRows = Inventory.parseCSV(text)
+      if (allRows.length < 2) {
+        showParseError('CSV must have a header row and at least one data row.')
+        return
+      }
+
+      // Map header columns (case-insensitive, trimmed)
+      const EXPECTED_COLS = ['name', 'sku', 'barcode', 'category', 'purchase_price',
+        'selling_price', 'stock_quantity', 'unit', 'low_stock_threshold']
+      const headerRow = allRows[0].map(h => h.toLowerCase().trim())
+      const colIndex = {}
+      EXPECTED_COLS.forEach(col => {
+        const idx = headerRow.indexOf(col)
+        if (idx !== -1) colIndex[col] = idx
+      })
+
+      if (colIndex['name'] === undefined) {
+        showParseError('CSV must have a "name" column.')
+        return
+      }
+
+      const dataRows = allRows.slice(1)
+      const validRows = []
+      const parseErrors = []
+
+      dataRows.forEach((fields, i) => {
+        const rowNum = i + 2
+        const get = (col) => colIndex[col] !== undefined ? (fields[colIndex[col]] || '') : ''
+        const name = get('name').trim()
+        if (!name) {
+          parseErrors.push({ row: rowNum, error: 'Missing product name' })
+          return
+        }
+        validRows.push({
+          name,
+          sku:               get('sku').trim(),
+          barcode:           get('barcode').trim(),
+          category:          get('category').trim(),
+          purchase_price:    get('purchase_price'),
+          selling_price:     get('selling_price'),
+          stock_quantity:    get('stock_quantity'),
+          unit:              get('unit') || 'pcs',
+          low_stock_threshold: get('low_stock_threshold') || '10',
+          _rowNum: rowNum
+        })
+      })
+
+      pendingRows = validRows
+
+      // Switch to preview step
+      document.getElementById('import-step-upload').style.display = 'none'
+      document.getElementById('import-step-preview').style.display = 'block'
+      document.getElementById('btn-import-confirm').style.display = 'inline-flex'
+
+      // Summary bar
+      const summaryBar = document.getElementById('import-summary-bar')
+      summaryBar.innerHTML = `
+        <span><strong>${dataRows.length}</strong> rows in file</span>
+        <span style="color:var(--success)"><strong>${validRows.length}</strong> ready to import</span>
+        ${parseErrors.length ? `<span style="color:var(--danger)"><strong>${parseErrors.length}</strong> rows with errors (skipped)</span>` : ''}
+      `
+
+      // Preview table (show first 100 rows to keep DOM fast)
+      const PREVIEW_COLS = ['name', 'sku', 'barcode', 'category', 'purchase_price', 'selling_price', 'stock_quantity', 'unit']
+      const headerRowEl = document.getElementById('preview-header-row')
+      headerRowEl.innerHTML = PREVIEW_COLS.map(c =>
+        `<th style="padding:6px 10px;text-align:left;font-weight:600;border-bottom:1px solid var(--border)">${c}</th>`
+      ).join('')
+
+      const PREVIEW_LIMIT = 100
+      const previewRows = validRows.slice(0, PREVIEW_LIMIT)
+      const tbody = document.getElementById('preview-tbody')
+      tbody.innerHTML = previewRows.map((r, idx) => `
+        <tr style="background:${idx % 2 === 0 ? 'transparent' : 'var(--bg-secondary)'}">
+          ${PREVIEW_COLS.map(c => `<td style="padding:5px 10px;border-bottom:1px solid var(--border)">${r[c] || ''}</td>`).join('')}
+        </tr>
+      `).join('')
+
+      if (validRows.length > PREVIEW_LIMIT) {
+        tbody.innerHTML += `<tr><td colspan="${PREVIEW_COLS.length}" style="padding:8px 10px;color:var(--text-muted);font-style:italic">
+          … and ${validRows.length - PREVIEW_LIMIT} more rows
+        </td></tr>`
+      }
+
+      // Parse errors section
+      if (parseErrors.length > 0) {
+        const errSection = document.getElementById('import-errors-section')
+        errSection.style.display = 'block'
+        document.getElementById('import-errors-title').textContent =
+          `${parseErrors.length} row${parseErrors.length > 1 ? 's' : ''} will be skipped:`
+        document.getElementById('import-errors-list').innerHTML =
+          parseErrors.map(e => `Row ${e.row}: ${e.error}`).join('<br>')
+      }
+
+      // Update confirm button label
+      document.getElementById('btn-import-confirm').textContent = `Import ${validRows.length} Products`
+    }
+
+    document.getElementById('btn-import-confirm').addEventListener('click', async () => {
+      if (!pendingRows.length) return
+
+      const btn = document.getElementById('btn-import-confirm')
+      btn.disabled = true
+      btn.textContent = `Importing ${pendingRows.length} products…`
+
+      const res = await window.api.products.bulkImport({ rows: pendingRows })
+
+      // Switch to result step
+      document.getElementById('import-step-preview').style.display = 'none'
+      document.getElementById('import-step-result').style.display = 'block'
+      document.getElementById('btn-import-confirm').style.display = 'none'
+      document.getElementById('btn-import-cancel').style.display = 'none'
+      document.getElementById('btn-import-done').style.display = 'inline-flex'
+
+      if (res.success) {
+        document.getElementById('result-icon').textContent = '✅'
+        document.getElementById('result-title').textContent = 'Import Complete'
+        const parts = []
+        if (res.inserted > 0) parts.push(`${res.inserted} new product${res.inserted > 1 ? 's' : ''} added`)
+        if (res.updated  > 0) parts.push(`${res.updated}  product${res.updated  > 1 ? 's' : ''} updated`)
+        document.getElementById('result-detail').innerHTML = parts.join(' &nbsp;·&nbsp; ') ||
+          'No changes were made.'
+        if (res.errors && res.errors.length > 0) {
+          document.getElementById('result-detail').innerHTML +=
+            `<br><span style="color:var(--danger);font-size:12px">${res.errors.length} row${res.errors.length > 1 ? 's' : ''} failed and were skipped</span>`
+        }
+      } else {
+        document.getElementById('result-icon').textContent = '❌'
+        document.getElementById('result-title').textContent = 'Import Failed'
+        document.getElementById('result-detail').textContent = res.error || 'Unknown error'
+      }
+
+      document.getElementById('btn-import-done').addEventListener('click', async () => {
+        App.closeModal()
+        if (res.success && (res.inserted > 0 || res.updated > 0)) {
+          await Inventory.render()
+        }
+      })
+    })
   },
 
   async showAddCategoryModal() {

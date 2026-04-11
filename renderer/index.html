@@ -18,17 +18,12 @@
       </div>
       <div id="license-screen-body">
         <div class="license-expired-msg" id="license-expired-msg"></div>
-        <div class="form-group">
-          <label for="license-key-input">License Key</label>
-          <input type="text" id="license-key-input" class="form-control"
-            placeholder="CS-YYYYMMDD-XXXXXXXX" autocomplete="off" spellcheck="false">
-        </div>
         <div id="license-error" class="alert alert-danger" style="display:none"></div>
-        <button class="btn btn-primary btn-block" onclick="LicenseScreen.activate()">
-          Activate License
+        <button class="btn btn-primary btn-block" id="license-import-btn" onclick="LicenseScreen.importFile()">
+          Import License File (.lic)
         </button>
       </div>
-      <p class="login-footer">Contact your software provider to obtain a license key.</p>
+      <p class="login-footer">Contact your software provider to obtain a license file.</p>
     </div>
   </div>
 

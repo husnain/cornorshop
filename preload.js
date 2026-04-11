@@ -15,7 +15,8 @@ contextBridge.exposeInMainWorld('api', {
     update: (data) => ipcRenderer.invoke('products:update', data),
     delete: (id) => ipcRenderer.invoke('products:delete', id),
     search: (query) => ipcRenderer.invoke('products:search', query),
-    getByBarcode: (barcode) => ipcRenderer.invoke('products:getByBarcode', barcode)
+    getByBarcode: (barcode) => ipcRenderer.invoke('products:getByBarcode', barcode),
+    bulkImport: (data) => ipcRenderer.invoke('products:bulkImport', data)
   },
 
   categories: {
@@ -68,7 +69,7 @@ contextBridge.exposeInMainWorld('api', {
 
   license: {
     check: () => ipcRenderer.invoke('license:check'),
-    activate: (data) => ipcRenderer.invoke('license:activate', data),
+    importFile: () => ipcRenderer.invoke('license:importFile'),
     getMachineId: () => ipcRenderer.invoke('license:getMachineId')
   }
 })

@@ -1,6 +1,6 @@
 {
   "name": "cornershop",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Desktop POS and inventory management for small grocery shops",
   "main": "main.js",
   "scripts": {
@@ -17,9 +17,12 @@
     "electron-updater": "^6.8.3"
   },
   "devDependencies": {
+    "@electron/asar": "^3.4.1",
+    "@electron/fuses": "^1.8.0",
     "electron": "^29.1.0",
     "electron-builder": "^24.13.3",
-    "electron-rebuild": "^3.2.9"
+    "electron-rebuild": "^3.2.9",
+    "javascript-obfuscator": "^4.2.2"
   },
   "repository": {
     "type": "git",
@@ -33,6 +36,7 @@
       "output": "dist",
       "buildResources": "assets"
     },
+    "afterPack": "build/afterPack.js",
     "files": [
       "main.js",
       "preload.js",
@@ -42,7 +46,9 @@
       "!node_modules/*/{CHANGELOG.md,README.md,readme.md,README}",
       "!node_modules/*/{test,__tests__,tests,example,examples}",
       "!node_modules/.bin",
-      "!**/*.map"
+      "!**/*.map",
+      "!tools/**/*",
+      "!build/**/*"
     ],
     "win": {
       "target": [

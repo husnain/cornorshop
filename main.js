@@ -170,6 +170,105 @@ ipcMain.handle('products:getByBarcode', wrap((barcode) => {
   return { success: true, product }
 }))
 
+ipcMain.handle('products:bulkImport', wrap((data) => {
+  const { rows } = data
+  if (!rows || !Array.isArray(rows) || rows.length === 0) {
+    return { success: false, error: 'No rows to import' }
+  }
+
+  let inserted = 0
+  let updated = 0
+  const errors = []
+
+  // Cache existing categories for fast lookup
+  const catMap = new Map()
+  db.prepare('SELECT id, name FROM categories').all().forEach(c => {
+    catMap.set(c.name.toLowerCase(), c.id)
+  })
+
+  const VALID_UNITS = new Set(['pcs', 'kg', 'g', 'L', 'mL', 'box', 'pack', 'dozen', 'bottle', 'can'])
+
+  const stmtInsertCat  = db.prepare('INSERT OR IGNORE INTO categories (name) VALUES (?)')
+  const stmtGetCat     = db.prepare('SELECT id FROM categories WHERE lower(name) = lower(?)')
+  const stmtFindBySku  = db.prepare('SELECT id FROM products WHERE sku = ?')
+  const stmtInsert     = db.prepare(`
+    INSERT INTO products
+      (name, sku, barcode, category_id, purchase_price, selling_price, stock_quantity, unit, low_stock_threshold)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+  const stmtUpdate     = db.prepare(`
+    UPDATE products
+    SET name = ?, barcode = ?, category_id = ?, purchase_price = ?, selling_price = ?,
+        stock_quantity = ?, unit = ?, low_stock_threshold = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE sku = ?
+  `)
+
+  // Run everything in one transaction — critical for thousands-of-rows performance
+  const runImport = db.transaction(() => {
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i]
+      const rowNum = i + 2 // 1-indexed + account for header row
+
+      try {
+        const name = String(row.name || '').trim()
+        if (!name) {
+          errors.push({ row: rowNum, error: 'Missing product name' })
+          continue
+        }
+
+        const sku               = String(row.sku      || '').trim() || null
+        const barcode           = String(row.barcode  || '').trim() || null
+        const purchase_price    = Math.max(0, parseFloat(row.purchase_price)    || 0)
+        const selling_price     = Math.max(0, parseFloat(row.selling_price)     || 0)
+        const stock_quantity    = Math.max(0, parseFloat(row.stock_quantity)    || 0)
+        const low_stock_threshold = Math.max(0, parseFloat(row.low_stock_threshold) || 10)
+        const rawUnit           = String(row.unit || 'pcs').trim()
+        const unit              = VALID_UNITS.has(rawUnit) ? rawUnit : 'pcs'
+
+        // Resolve category — create it automatically if unknown
+        let category_id = null
+        const catName = String(row.category || '').trim()
+        if (catName) {
+          const key = catName.toLowerCase()
+          if (catMap.has(key)) {
+            category_id = catMap.get(key)
+          } else {
+            stmtInsertCat.run(catName)
+            const cat = stmtGetCat.get(catName)
+            if (cat) {
+              catMap.set(key, cat.id)
+              category_id = cat.id
+            }
+          }
+        }
+
+        if (sku) {
+          const existing = stmtFindBySku.get(sku)
+          if (existing) {
+            stmtUpdate.run(name, barcode, category_id, purchase_price, selling_price,
+              stock_quantity, unit, low_stock_threshold, sku)
+            updated++
+          } else {
+            stmtInsert.run(name, sku, barcode, category_id, purchase_price, selling_price,
+              stock_quantity, unit, low_stock_threshold)
+            inserted++
+          }
+        } else {
+          stmtInsert.run(name, null, barcode, category_id, purchase_price, selling_price,
+            stock_quantity, unit, low_stock_threshold)
+          inserted++
+        }
+      } catch (err) {
+        errors.push({ row: rowNum, error: err.message })
+      }
+    }
+  })
+
+  runImport()
+
+  return { success: true, inserted, updated, errors }
+}))
+
 // ─── Categories ───────────────────────────────────────────────────────────────
 ipcMain.handle('categories:getAll', wrap(() => {
   const categories = db.prepare('SELECT * FROM categories ORDER BY name ASC').all()
@@ -515,13 +614,16 @@ ipcMain.handle('license:check', wrap(() => {
   const s = {}
   for (const r of rows) s[r.key] = r.value
 
-  // If a license key is stored, validate it against this machine
+  // If a license is stored, validate it against this machine
   if (s.license_key) {
-    const result = validateKey(s.license_key, machineId)
-    if (result.valid) {
-      return { success: true, status: 'licensed', daysLeft: result.daysLeft, expiryDate: result.expiryDate }
-    }
-    // Key is invalid/expired/wrong machine — fall through to trial check
+    try {
+      const license = JSON.parse(s.license_key)
+      const result = validateKey(license, machineId)
+      if (result.valid) {
+        return { success: true, status: 'licensed', daysLeft: result.daysLeft, expiryDate: result.expiryDate }
+      }
+    } catch { /* corrupt stored value — fall through */ }
+    // Invalid/expired/wrong machine — fall through to trial check
   }
 
   // Check trial
@@ -547,16 +649,29 @@ ipcMain.handle('license:check', wrap(() => {
   return { success: true, status: 'expired', daysLeft: 0, expiryDate: trial.expiryDate, machineId }
 }))
 
-ipcMain.handle('license:activate', wrap(({ key }) => {
-  const machineId = getMachineId()
-  const result = validateKey(key, machineId)
-  if (!result.valid) {
-    return { success: false, error: result.reason }
+ipcMain.handle('license:importFile', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+    title: 'Import License File',
+    filters: [{ name: 'License File', extensions: ['lic'] }],
+    properties: ['openFile']
+  })
+  if (canceled || !filePaths.length) return { success: false, error: 'No file selected' }
+
+  let license
+  try {
+    const fs = require('fs')
+    license = JSON.parse(fs.readFileSync(filePaths[0], 'utf8'))
+  } catch {
+    return { success: false, error: 'Could not read license file' }
   }
-  // Store the validated key
-  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('license_key', ?)").run(key.trim().toUpperCase())
+
+  const machineId = getMachineId()
+  const result = validateKey(license, machineId)
+  if (!result.valid) return { success: false, error: result.reason }
+
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('license_key', ?)").run(JSON.stringify(license))
   return { success: true, daysLeft: result.daysLeft, expiryDate: result.expiryDate }
-}))
+})
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
 ipcMain.handle('settings:get', wrap(() => {

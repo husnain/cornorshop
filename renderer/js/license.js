@@ -25,48 +25,32 @@ const LicenseScreen = {
           <div class="license-info-sub">Expired on ${expiredOn}</div>
         </div>
       </div>
-      <p class="license-info-text">Enter your license key below to continue using CornerShop.</p>
+      <p class="license-info-text">Import your license file below to continue using CornerShop.</p>
       <div class="license-machine-box">
         <span class="license-machine-label">Machine ID:</span>
         <code class="license-machine-id">${machineId}</code>
         <button class="btn-copy-machine-id" title="Copy Machine ID" onclick="navigator.clipboard.writeText('${machineId}')">Copy</button>
       </div>
-      <p class="license-info-text" style="font-size:0.8em;color:#888;">Share this Machine ID with support to receive your license key.</p>
+      <p class="license-info-text" style="font-size:0.8em;color:#888;">Share this Machine ID with your software provider to receive a license file.</p>
     `
-
-    // Allow pressing Enter in the input to activate
-    const input = document.getElementById('license-key-input')
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') LicenseScreen.activate()
-    })
   },
 
-  async activate() {
-    const input = document.getElementById('license-key-input')
+  async importFile() {
     const errorEl = document.getElementById('license-error')
-    const key = input.value.trim()
+    const btn = document.getElementById('license-import-btn')
 
     errorEl.style.display = 'none'
-
-    if (!key) {
-      errorEl.textContent = 'Please enter a license key.'
-      errorEl.style.display = 'block'
-      return
-    }
-
-    const btn = document.querySelector('#license-screen-body .btn')
-    btn.textContent = 'Activating…'
+    btn.textContent = 'Importing…'
     btn.disabled = true
 
-    const res = await window.api.license.activate({ key })
+    const res = await window.api.license.importFile()
 
-    btn.textContent = 'Activate License'
+    btn.textContent = 'Import License File (.lic)'
     btn.disabled = false
 
     if (!res.success) {
-      errorEl.textContent = res.error || 'Invalid license key.'
+      errorEl.textContent = res.error || 'Failed to import license.'
       errorEl.style.display = 'block'
-      input.select()
       return
     }
 

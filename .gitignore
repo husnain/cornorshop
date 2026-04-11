@@ -2,3 +2,7 @@ node_modules/
 dist/
 *.log
 .DS_Store
+
+# Private keygen tool — contains the signing private key, never commit
+tools/keygen.js
+tools/*.lic

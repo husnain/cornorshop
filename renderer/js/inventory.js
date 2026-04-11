@@ -57,13 +57,13 @@ const Inventory = {
             <tr>
               <th>Name</th>
               <th>SKU</th>
-              <th>Barcode</th>
               <th>Category</th>
-              <th class="text-right">Purchase Price</th>
-              <th class="text-right">Selling Price</th>
+              <th class="text-right">Purchase</th>
+              <th class="text-right">Selling</th>
               <th class="text-right">Stock</th>
               <th>Unit</th>
               <th class="text-right">Margin</th>
+              <th>Expiry</th>
               <th>Status</th>
               <th class="text-center">Actions</th>
             </tr>
@@ -129,13 +129,31 @@ const Inventory = {
         ? (((p.selling_price - p.purchase_price) / p.selling_price) * 100).toFixed(1)
         : '0.0'
       const marginClass = Number(margin) > 0 ? 'margin-positive' : (Number(margin) < 0 ? 'margin-negative' : 'margin-zero')
-      const rowClass = isLow ? 'low-stock-row' : ''
+
+      // Expiry cell
+      let expiryCell = '<span style="color:var(--text-muted)">—</span>'
+      if (p.expiry_date) {
+        const today = new Date(); today.setHours(0,0,0,0)
+        const exp = new Date(p.expiry_date); exp.setHours(0,0,0,0)
+        const daysLeft = Math.round((exp - today) / 86400000)
+        if (daysLeft < 0) {
+          expiryCell = `<span class="badge badge-danger">Expired</span>`
+        } else if (daysLeft <= 7) {
+          expiryCell = `<span class="badge badge-danger">${daysLeft}d left</span>`
+        } else if (daysLeft <= 30) {
+          expiryCell = `<span class="badge badge-warning">${daysLeft}d left</span>`
+        } else {
+          expiryCell = `<span style="color:var(--text-muted);font-size:12px">${App.formatDate(p.expiry_date)}</span>`
+        }
+      }
+
+      const isExpired = p.expiry_date && new Date(p.expiry_date) < new Date()
+      const rowClass = isExpired ? 'low-stock-row' : (isLow ? 'low-stock-row' : '')
 
       return `
         <tr class="${rowClass}">
           <td><strong>${p.name}</strong></td>
           <td><code style="font-size:12px">${p.sku || '—'}</code></td>
-          <td><code style="font-size:12px">${p.barcode || '—'}</code></td>
           <td>${p.category_name || '—'}</td>
           <td class="text-right">${App.formatCurrency(p.purchase_price)}</td>
           <td class="text-right">${App.formatCurrency(p.selling_price)}</td>
@@ -145,15 +163,19 @@ const Inventory = {
           </td>
           <td>${p.unit}</td>
           <td class="text-right"><span class="${marginClass}">${margin}%</span></td>
+          <td>${expiryCell}</td>
           <td>
-            ${isLow
-              ? '<span class="badge badge-danger">Low Stock</span>'
-              : '<span class="badge badge-success">OK</span>'
+            ${isExpired
+              ? '<span class="badge badge-danger">Expired</span>'
+              : isLow
+                ? '<span class="badge badge-danger">Low Stock</span>'
+                : '<span class="badge badge-success">OK</span>'
             }
           </td>
           <td class="text-center">
             <div style="display:flex;gap:6px;justify-content:center">
               <button class="btn btn-sm btn-secondary" onclick="Inventory.showProductModal(${p.id})">Edit</button>
+              <button class="btn btn-sm btn-warning" onclick="Waste.showLogModal(${p.id})" title="Log waste/spoilage">Waste</button>
               <button class="btn btn-sm btn-danger" onclick="Inventory.deleteProduct(${p.id})">Del</button>
             </div>
           </td>
@@ -231,6 +253,15 @@ const Inventory = {
             <input type="number" name="low_stock_threshold" value="${product ? product.low_stock_threshold : '10'}" step="0.1" min="0" placeholder="10">
           </div>
         </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Expiry Date <span style="font-weight:400;color:var(--text-muted)">(optional)</span></label>
+            <input type="date" name="expiry_date" value="${product && product.expiry_date ? product.expiry_date : ''}">
+          </div>
+          <div class="form-group" style="display:flex;align-items:flex-end">
+            <span style="font-size:12px;color:var(--text-muted)">Leave blank if this product has no fixed expiry.</span>
+          </div>
+        </div>
       </form>
     `
 
@@ -275,7 +306,8 @@ const Inventory = {
       selling_price: parseFloat(formData.get('selling_price')) || 0,
       stock_quantity: parseFloat(formData.get('stock_quantity')) || 0,
       unit: formData.get('unit'),
-      low_stock_threshold: parseFloat(formData.get('low_stock_threshold')) || 10
+      low_stock_threshold: parseFloat(formData.get('low_stock_threshold')) || 10,
+      expiry_date: formData.get('expiry_date') || null
     }
 
     if (!data.name) {

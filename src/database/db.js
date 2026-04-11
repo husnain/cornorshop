@@ -101,10 +101,28 @@ function initDatabase(dbPath) {
     );
   `)
 
-  // Migration: add barcode column for existing databases
-  // SQLite ALTER TABLE ADD COLUMN does not allow UNIQUE — add plain column then create index separately
+  // ── Migrations ────────────────────────────────────────────────────────────────
   try { db.exec('ALTER TABLE products ADD COLUMN barcode TEXT') } catch (_) {}
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode) WHERE barcode IS NOT NULL')
+
+  // Expiry date per product (nullable — not all products have one)
+  try { db.exec('ALTER TABLE products ADD COLUMN expiry_date DATE') } catch (_) {}
+
+  // Waste / spoilage log
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS waste_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      product_id INTEGER REFERENCES products(id),
+      product_name TEXT NOT NULL,
+      quantity REAL NOT NULL,
+      unit TEXT NOT NULL DEFAULT 'pcs',
+      reason TEXT NOT NULL DEFAULT 'Spoiled',
+      notes TEXT,
+      logged_by TEXT,
+      cost_value REAL DEFAULT 0,
+      logged_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
 
   // Seed default settings (INSERT OR IGNORE — won't overwrite existing values)
   db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('currency_code', 'PKR')").run()

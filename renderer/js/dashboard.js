@@ -38,6 +38,31 @@ const Dashboard = {
     `).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px">No sales today</td></tr>'
 
     const lowStockClass = s.low_stock_count > 0 ? 'red' : 'green'
+    const expiryClass = (s.expired_count > 0) ? 'red' : (s.expiring_soon_count > 0 ? 'orange' : 'green')
+
+    // Alerts panel rows
+    const lowStockAlertRows = (s.low_stock_items || []).map(p => `
+      <div class="alert-row">
+        <span class="alert-name">${p.name}</span>
+        <span class="alert-detail">${Number(p.stock_quantity).toFixed(1)} ${p.unit} left (min ${Number(p.low_stock_threshold).toFixed(1)})</span>
+        <button class="btn btn-sm btn-secondary" onclick="App.navigate('inventory')" style="padding:2px 8px;font-size:11px">View</button>
+      </div>
+    `).join('') || '<div style="color:var(--text-muted);font-size:13px;padding:8px 0">All products are well stocked.</div>'
+
+    const expiryAlertRows = (s.expiry_alerts || []).map(a => {
+      const badge = a.days_left < 0
+        ? `<span class="badge badge-danger">Expired</span>`
+        : a.days_left <= 7
+          ? `<span class="badge badge-danger">${a.days_left}d left</span>`
+          : `<span class="badge badge-warning">${a.days_left}d left</span>`
+      return `
+        <div class="alert-row">
+          <span class="alert-name">${a.name}</span>
+          <span class="alert-detail">${App.formatDate(a.expiry_date)}</span>
+          ${badge}
+        </div>
+      `
+    }).join('') || '<div style="color:var(--text-muted);font-size:13px;padding:8px 0">No products expiring within 30 days.</div>'
 
     content.innerHTML = `
       <div class="page-header">
@@ -66,17 +91,39 @@ const Dashboard = {
           <div class="stat-value">${fc(s.today_profit)}</div>
           <div class="stat-sub">${profitMargin}% margin</div>
         </div>
-        <div class="stat-card orange">
-          <div class="stat-icon">📅</div>
-          <div class="stat-label">Week Sales</div>
-          <div class="stat-value">${fc(s.week_sales)}</div>
-          <div class="stat-sub">Month: ${fc(s.month_sales)}</div>
-        </div>
         <div class="stat-card ${lowStockClass}">
           <div class="stat-icon">⚠️</div>
           <div class="stat-label">Low Stock Items</div>
           <div class="stat-value">${s.low_stock_count}</div>
           <div class="stat-sub">Inventory: ${fc(s.inventory_value)}</div>
+        </div>
+        <div class="stat-card ${expiryClass}">
+          <div class="stat-icon">🗓️</div>
+          <div class="stat-label">Expiry Alerts</div>
+          <div class="stat-value">${s.expired_count + s.expiring_soon_count}</div>
+          <div class="stat-sub">${s.expired_count} expired · ${s.expiring_soon_count} expiring soon</div>
+        </div>
+      </div>
+
+      <!-- Alerts Panel -->
+      <div class="dashboard-grid" style="margin-bottom:16px">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">⚠️ Low Stock</div>
+            <button class="btn btn-sm btn-secondary" onclick="App.navigate('inventory')">Manage</button>
+          </div>
+          <div class="card-body" style="padding:8px 16px">
+            ${lowStockAlertRows}
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">🗓️ Expiring Products</div>
+            <button class="btn btn-sm btn-secondary" onclick="App.navigate('inventory')">Manage</button>
+          </div>
+          <div class="card-body" style="padding:8px 16px">
+            ${expiryAlertRows}
+          </div>
         </div>
       </div>
 
@@ -137,18 +184,22 @@ const Dashboard = {
           <button class="btn btn-sm btn-secondary" onclick="App.navigate('inventory')">Manage Inventory</button>
         </div>
         <div class="card-body">
-          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;text-align:center">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;text-align:center">
             <div>
-              <div style="font-size:24px;font-weight:700;color:var(--primary)">${fc(s.inventory_value)}</div>
+              <div style="font-size:22px;font-weight:700;color:var(--primary)">${fc(s.inventory_value)}</div>
               <div style="font-size:12px;color:var(--text-muted)">Total Inventory Value</div>
             </div>
             <div>
-              <div style="font-size:24px;font-weight:700;color:${s.low_stock_count > 0 ? 'var(--danger)' : 'var(--success)'}">${s.low_stock_count}</div>
+              <div style="font-size:22px;font-weight:700;color:${s.low_stock_count > 0 ? 'var(--danger)' : 'var(--success)'}">${s.low_stock_count}</div>
               <div style="font-size:12px;color:var(--text-muted)">Low Stock Items</div>
             </div>
             <div>
-              <div style="font-size:24px;font-weight:700;color:var(--info)">${fc(s.month_sales)}</div>
+              <div style="font-size:22px;font-weight:700;color:var(--info)">${fc(s.month_sales)}</div>
               <div style="font-size:12px;color:var(--text-muted)">This Month's Revenue</div>
+            </div>
+            <div>
+              <div style="font-size:22px;font-weight:700;color:${s.waste_value > 0 ? 'var(--danger)' : 'var(--text-muted)'}">${fc(s.waste_value)}</div>
+              <div style="font-size:12px;color:var(--text-muted)">Waste This Month (${s.waste_entries} entries)</div>
             </div>
           </div>
         </div>

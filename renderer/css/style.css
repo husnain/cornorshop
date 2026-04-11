@@ -1231,6 +1231,19 @@ select { cursor: pointer; }
 .margin-negative { color: var(--danger); font-weight: 600; }
 .margin-zero { color: var(--text-muted); }
 
+/* ─── Dashboard Alert Rows ───────────────────────────────────────────────────── */
+.alert-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border-light);
+  font-size: 13px;
+}
+.alert-row:last-child { border-bottom: none; }
+.alert-name { flex: 1; font-weight: 500; }
+.alert-detail { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+
 /* ─── Utility ────────────────────────────────────────────────────────────────── */
 .mb-0 { margin-bottom: 0; }
 .mb-1 { margin-bottom: 8px; }

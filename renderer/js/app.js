@@ -65,7 +65,8 @@ const App = {
       deliveries: () => Deliveries.render(),
       reports: () => Reports.render(),
       users: () => Users.render(),
-      settings: () => Settings.render()
+      settings: () => Settings.render(),
+      waste: () => Waste.render()
     }
 
     if (viewFns[view]) {
@@ -125,6 +126,7 @@ const App = {
       { view: 'inventory', icon: '📦', label: 'Inventory', ownerOnly: true },
       { view: 'deliveries', icon: '🚚', label: 'Deliveries', ownerOnly: true },
       { view: 'reports', icon: '📈', label: 'Reports', ownerOnly: true },
+      { view: 'waste', icon: '🗑️', label: 'Waste Log', ownerOnly: true },
       { view: 'users', icon: '👥', label: 'Users', ownerOnly: true },
       { view: 'settings', icon: '⚙️', label: 'Settings', ownerOnly: true }
     ]

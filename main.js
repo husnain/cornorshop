@@ -106,11 +106,11 @@ ipcMain.handle('products:getAll', wrap(() => {
 }))
 
 ipcMain.handle('products:create', wrap((data) => {
-  const { name, sku, barcode, category_id, purchase_price, selling_price, stock_quantity, unit, low_stock_threshold } = data
+  const { name, sku, barcode, category_id, purchase_price, selling_price, stock_quantity, unit, low_stock_threshold, expiry_date } = data
   const result = db.prepare(`
-    INSERT INTO products (name, sku, barcode, category_id, purchase_price, selling_price, stock_quantity, unit, low_stock_threshold)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(name, sku || null, barcode || null, category_id || null, purchase_price || 0, selling_price || 0, stock_quantity || 0, unit || 'pcs', low_stock_threshold || 10)
+    INSERT INTO products (name, sku, barcode, category_id, purchase_price, selling_price, stock_quantity, unit, low_stock_threshold, expiry_date)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(name, sku || null, barcode || null, category_id || null, purchase_price || 0, selling_price || 0, stock_quantity || 0, unit || 'pcs', low_stock_threshold || 10, expiry_date || null)
   const product = db.prepare(`
     SELECT p.*, c.name AS category_name
     FROM products p
@@ -121,13 +121,13 @@ ipcMain.handle('products:create', wrap((data) => {
 }))
 
 ipcMain.handle('products:update', wrap((data) => {
-  const { id, name, sku, barcode, category_id, purchase_price, selling_price, stock_quantity, unit, low_stock_threshold } = data
+  const { id, name, sku, barcode, category_id, purchase_price, selling_price, stock_quantity, unit, low_stock_threshold, expiry_date } = data
   db.prepare(`
     UPDATE products
     SET name = ?, sku = ?, barcode = ?, category_id = ?, purchase_price = ?, selling_price = ?,
-        stock_quantity = ?, unit = ?, low_stock_threshold = ?, updated_at = CURRENT_TIMESTAMP
+        stock_quantity = ?, unit = ?, low_stock_threshold = ?, expiry_date = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
-  `).run(name, sku || null, barcode || null, category_id || null, purchase_price || 0, selling_price || 0, stock_quantity || 0, unit || 'pcs', low_stock_threshold || 10, id)
+  `).run(name, sku || null, barcode || null, category_id || null, purchase_price || 0, selling_price || 0, stock_quantity || 0, unit || 'pcs', low_stock_threshold || 10, expiry_date || null, id)
   const product = db.prepare(`
     SELECT p.*, c.name AS category_name
     FROM products p
@@ -461,6 +461,46 @@ ipcMain.handle('dashboard:getStats', wrap(() => {
     WHERE stock_quantity <= low_stock_threshold
   `).get()
 
+  const lowStockItems = db.prepare(`
+    SELECT id, name, stock_quantity, low_stock_threshold, unit
+    FROM products
+    WHERE stock_quantity <= low_stock_threshold
+    ORDER BY (stock_quantity - low_stock_threshold) ASC
+    LIMIT 20
+  `).all()
+
+  const expiryAlerts = db.prepare(`
+    SELECT id, name, expiry_date,
+           CAST(julianday(expiry_date) - julianday('now','localtime') AS INTEGER) AS days_left
+    FROM products
+    WHERE expiry_date IS NOT NULL AND expiry_date != ''
+      AND date(expiry_date) <= date('now','localtime','+30 days')
+    ORDER BY expiry_date ASC
+    LIMIT 20
+  `).all()
+
+  const expiredCount = db.prepare(`
+    SELECT COUNT(*) AS expired_count
+    FROM products
+    WHERE expiry_date IS NOT NULL AND expiry_date != ''
+      AND date(expiry_date) < date('now','localtime')
+  `).get()
+
+  const expiringSoonCount = db.prepare(`
+    SELECT COUNT(*) AS expiring_soon_count
+    FROM products
+    WHERE expiry_date IS NOT NULL AND expiry_date != ''
+      AND date(expiry_date) BETWEEN date('now','localtime') AND date('now','localtime','+30 days')
+  `).get()
+
+  const wasteThisMonth = db.prepare(`
+    SELECT COALESCE(SUM(cost_value), 0) AS waste_value,
+           COALESCE(SUM(quantity), 0) AS waste_qty,
+           COUNT(*) AS waste_entries
+    FROM waste_log
+    WHERE strftime('%Y-%m', logged_at, 'localtime') = strftime('%Y-%m', 'now', 'localtime')
+  `).get()
+
   const topProducts = db.prepare(`
     SELECT si.product_name, SUM(si.quantity) AS total_qty, SUM(si.total_price) AS total_revenue
     FROM sale_items si
@@ -487,6 +527,12 @@ ipcMain.handle('dashboard:getStats', wrap(() => {
       month_sales: monthSales.month_sales,
       inventory_value: inventoryValue.inventory_value,
       low_stock_count: lowStockCount.low_stock_count,
+      low_stock_items: lowStockItems,
+      expired_count: expiredCount.expired_count,
+      expiring_soon_count: expiringSoonCount.expiring_soon_count,
+      expiry_alerts: expiryAlerts,
+      waste_value: wasteThisMonth.waste_value,
+      waste_entries: wasteThisMonth.waste_entries,
       top_products: topProducts,
       recent_sales: recentSales
     }
@@ -672,6 +718,38 @@ ipcMain.handle('license:importFile', async () => {
   db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('license_key', ?)").run(JSON.stringify(license))
   return { success: true, daysLeft: result.daysLeft, expiryDate: result.expiryDate }
 })
+
+// ─── Waste Log ────────────────────────────────────────────────────────────────
+ipcMain.handle('waste:log', wrap((data) => {
+  const { product_id, quantity, reason, notes } = data
+  const product = db.prepare('SELECT * FROM products WHERE id = ?').get(product_id)
+  if (!product) return { success: false, error: 'Product not found' }
+  if (quantity <= 0) return { success: false, error: 'Quantity must be greater than zero' }
+  if (quantity > product.stock_quantity) return { success: false, error: 'Quantity exceeds current stock' }
+
+  const cost_value = quantity * (product.purchase_price || 0)
+  const loggedBy = currentUser ? currentUser.name : 'Unknown'
+
+  db.prepare(`
+    INSERT INTO waste_log (product_id, product_name, quantity, unit, reason, notes, logged_by, cost_value)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(product_id, product.name, quantity, product.unit, reason || 'Spoiled', notes || null, loggedBy, cost_value)
+
+  db.prepare('UPDATE products SET stock_quantity = stock_quantity - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+    .run(quantity, product_id)
+
+  return { success: true, cost_value }
+}))
+
+ipcMain.handle('waste:getAll', wrap(() => {
+  const entries = db.prepare(`
+    SELECT w.*, p.selling_price
+    FROM waste_log w
+    LEFT JOIN products p ON p.id = w.product_id
+    ORDER BY w.logged_at DESC
+  `).all()
+  return { success: true, entries }
+}))
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
 ipcMain.handle('settings:get', wrap(() => {

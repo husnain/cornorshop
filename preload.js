@@ -67,6 +67,11 @@ contextBridge.exposeInMainWorld('api', {
     set: (data) => ipcRenderer.invoke('settings:set', data)
   },
 
+  waste: {
+    log: (data) => ipcRenderer.invoke('waste:log', data),
+    getAll: () => ipcRenderer.invoke('waste:getAll')
+  },
+
   license: {
     check: () => ipcRenderer.invoke('license:check'),
     importFile: () => ipcRenderer.invoke('license:importFile'),

@@ -46,12 +46,19 @@ const Settings = {
     // Build license status block
     let licenseStatusHTML = ''
     if (licenseRes.success) {
-      const { status, daysLeft, expiryDate } = licenseRes
+      const { status, daysLeft, expiryDate, inGrace, graceDaysLeft } = licenseRes
       const expiryStr = expiryDate
         ? new Date(expiryDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
         : 'N/A'
 
-      if (status === 'licensed') {
+      if (inGrace) {
+        const label = status === 'licensed' ? 'License Expired' : 'Trial Expired'
+        licenseStatusHTML = `
+          <div class="license-status-badge danger">
+            <span>⚠ ${label} — Grace Period</span>
+            <span>${graceDaysLeft} day${graceDaysLeft !== 1 ? 's' : ''} left &nbsp;·&nbsp; Expired ${expiryStr}</span>
+          </div>`
+      } else if (status === 'licensed') {
         licenseStatusHTML = `
           <div class="license-status-badge licensed">
             <span>✔ Licensed</span>
@@ -141,27 +148,24 @@ const Settings = {
       <div class="card settings-card">
         <div class="settings-section">
           <h3 class="settings-section-title">License</h3>
-          <p class="settings-section-desc">Activate a license key to use CornerShop beyond the 3-month trial.</p>
+          <p class="settings-section-desc">Import a license file (.lic) to use CornerShop beyond the 3-month trial. Contact your software provider with the Machine ID below to obtain one.</p>
 
           ${licenseStatusHTML}
 
-          <div class="form-group">
-            <label for="settings-license-input">License Key</label>
-            <input type="text" id="settings-license-input" class="form-control"
-              placeholder="CS-YYYYMMDD-XXXXXXXX" autocomplete="off" spellcheck="false">
+          <div class="license-machine-box" style="margin: 12px 0;">
+            <span class="license-machine-label">Machine ID:</span>
+            <code class="license-machine-id">${licenseRes.machineId || '—'}</code>
           </div>
+
           <div id="settings-license-error" class="alert alert-danger" style="display:none; max-width:380px;"></div>
-          <button class="btn btn-primary" onclick="Settings.activateLicense()">
-            Activate License
+          <button class="btn btn-primary" id="settings-license-import-btn" onclick="Settings.importLicense()">
+            Import License File (.lic)
           </button>
         </div>
       </div>
     `
 
     document.getElementById('currency-select').addEventListener('change', Settings.updatePreview)
-    document.getElementById('settings-license-input').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') Settings.activateLicense()
-    })
     Settings.updatePreview()
   },
 
@@ -231,45 +235,37 @@ const Settings = {
     }
   },
 
-  async activateLicense() {
-    const input = document.getElementById('settings-license-input')
+  async importLicense() {
     const errorEl = document.getElementById('settings-license-error')
-    const key = input.value.trim()
+    const btn = document.getElementById('settings-license-import-btn')
 
     errorEl.style.display = 'none'
-
-    if (!key) {
-      errorEl.textContent = 'Please enter a license key.'
-      errorEl.style.display = 'block'
-      return
-    }
-
-    const btn = document.querySelector('#settings-license-error + button') ||
-                document.querySelector('[onclick="Settings.activateLicense()"]')
     const origText = btn.textContent
-    btn.textContent = 'Activating…'
+    btn.textContent = 'Importing…'
     btn.disabled = true
 
-    const res = await window.api.license.activate({ key })
+    const res = await window.api.license.importFile()
 
     btn.textContent = origText
     btn.disabled = false
 
     if (!res.success) {
-      errorEl.textContent = res.error || 'Invalid license key.'
-      errorEl.style.display = 'block'
-      input.select()
+      // 'No file selected' just means the user cancelled the dialog — no error.
+      if (res.error && res.error !== 'No file selected') {
+        errorEl.textContent = res.error
+        errorEl.style.display = 'block'
+      }
       return
     }
 
-    // Clear trial banner since we're now licensed
+    // Clear trial / grace banner since we're now licensed
     App._trialDaysLeft = null
+    App._graceDaysLeft = null
     const banner = document.getElementById('trial-banner')
     if (banner) banner.style.display = 'none'
 
     App.showToast(`License activated! Valid for ${res.daysLeft} more days.`, 'success')
 
-    // Re-render settings to show updated status
     Settings.render()
   }
 }

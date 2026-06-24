@@ -24,9 +24,14 @@ const App = {
       }
     }
 
-    // 3. Show trial banner if on trial
-    if (licenseRes.success && licenseRes.status === 'trial') {
-      App._trialDaysLeft = licenseRes.daysLeft
+    // 3. Show trial / grace banner if applicable
+    if (licenseRes.success) {
+      if (licenseRes.inGrace) {
+        App._graceDaysLeft = licenseRes.graceDaysLeft
+        App._graceFor = licenseRes.status  // 'trial' or 'licensed'
+      } else if (licenseRes.status === 'trial') {
+        App._trialDaysLeft = licenseRes.daysLeft
+      }
     }
 
     // 4. Check auth
@@ -56,6 +61,9 @@ const App = {
 
     App.currentView = view
     const content = document.getElementById('content')
+    // Reset inline styles other views (e.g. POS) may have set on the scroll container.
+    content.style.padding = ''
+    content.style.overflow = ''
     content.innerHTML = '<div class="loading-wrapper"><div class="spinner"></div></div>'
 
     const viewFns = {
@@ -105,14 +113,28 @@ const App = {
 
   _renderTrialBanner() {
     const banner = document.getElementById('trial-banner')
-    if (!banner || !App._trialDaysLeft) return
+    if (!banner) return
+
+    if (App._graceDaysLeft != null) {
+      const days = App._graceDaysLeft
+      const label = App._graceFor === 'licensed' ? 'License expired' : 'Trial expired'
+      banner.style.display = 'block'
+      banner.style.background = '#dc3545'
+      banner.innerHTML = `
+        <span>${label} — grace period: <strong>${days} day${days !== 1 ? 's' : ''}</strong> left</span>
+        <button onclick="App.navigate('settings')" style="margin-left:8px;background:rgba(255,255,255,0.25);border:none;border-radius:4px;padding:2px 8px;cursor:pointer;color:inherit;font-size:0.8rem;">Import License</button>
+      `
+      return
+    }
+
+    if (!App._trialDaysLeft) return
     const days = App._trialDaysLeft
     const color = days <= 7 ? '#dc3545' : days <= 30 ? '#ffc107' : '#52b788'
     banner.style.display = 'block'
     banner.style.background = color
     banner.innerHTML = `
       <span>Trial: <strong>${days} day${days !== 1 ? 's' : ''}</strong> remaining</span>
-      <button onclick="App.navigate('settings')" style="margin-left:8px;background:rgba(255,255,255,0.25);border:none;border-radius:4px;padding:2px 8px;cursor:pointer;color:inherit;font-size:0.8rem;">Enter License</button>
+      <button onclick="App.navigate('settings')" style="margin-left:8px;background:rgba(255,255,255,0.25);border:none;border-radius:4px;padding:2px 8px;cursor:pointer;color:inherit;font-size:0.8rem;">Import License</button>
     `
   },
 

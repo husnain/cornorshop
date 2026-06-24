@@ -208,6 +208,13 @@ const POS = {
 
     document.getElementById('cart-discount').addEventListener('input', POS.updateTotals)
     document.getElementById('amount-paid').addEventListener('input', POS.updateChange)
+    document.getElementById('amount-paid').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        const btn = document.getElementById('btn-complete-sale')
+        if (btn && !btn.disabled) POS.completeSale()
+      }
+    })
 
     document.getElementById('payment-method').addEventListener('change', (e) => {
       const cashSection = document.getElementById('cash-section')

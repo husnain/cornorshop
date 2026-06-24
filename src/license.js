@@ -10,6 +10,20 @@ MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEHibOxpttGqdOb3wjtQanutXn73mp
 nTmG6XxqV5cdRzR2CzeoqmBr1c1Zh3CfuSL8ZJ8NzGJURMJaTZgttNKcsA==
 -----END PUBLIC KEY-----`
 
+// Symmetric key used to encrypt the .lic file payload. Keeps the file opaque
+// (no readable machineId/expiry) and lets GCM detect any byte-level tampering
+// before signature verification runs. Same key must live in tools/keygen.js.
+const LICENSE_CIPHER_KEY = Buffer.from(
+  '8652c65f31771d6d12929cb813f273a7b04889b2303f29f7d4113ada7e1efd62',
+  'hex'
+)
+const LICENSE_FILE_MAGIC = Buffer.from('CSL1')  // CornerShop License v1
+
+// Grace window after a trial or paid license has officially expired. The app
+// keeps working but the UI nags so users have a few days to obtain/renew a
+// .lic file without losing access to their POS mid-shift.
+const GRACE_DAYS = 3
+
 /**
  * Generate a stable fingerprint for the current machine.
  * Uses hostname + all non-internal MAC addresses.
@@ -74,6 +88,17 @@ function validateKey(license, currentMachineId) {
 
   const now = new Date()
   if (now > expiryDate) {
+    const graceEnd = new Date(expiryDate.getTime() + GRACE_DAYS * 24 * 60 * 60 * 1000)
+    if (now <= graceEnd) {
+      const graceDaysLeft = Math.max(0, Math.ceil((graceEnd - now) / (1000 * 60 * 60 * 24)))
+      return {
+        valid: true,
+        inGrace: true,
+        graceDaysLeft,
+        daysLeft: 0,
+        expiryDate: expiryDate.toISOString()
+      }
+    }
     return { valid: false, reason: 'License has expired', expired: true, expiryDate: expiryDate.toISOString(), daysLeft: 0 }
   }
 
@@ -94,13 +119,58 @@ function checkTrial(trialStart) {
   expiry.setHours(23, 59, 59, 999)
 
   const now = new Date()
-  const daysLeft = Math.max(0, Math.ceil((expiry - now) / (1000 * 60 * 60 * 24)))
+  const graceEnd = new Date(expiry.getTime() + GRACE_DAYS * 24 * 60 * 60 * 1000)
 
-  return {
-    active: now <= expiry,
-    daysLeft,
-    expiryDate: expiry.toISOString()
+  if (now <= expiry) {
+    const daysLeft = Math.max(0, Math.ceil((expiry - now) / (1000 * 60 * 60 * 24)))
+    return { active: true, daysLeft, expiryDate: expiry.toISOString() }
   }
+
+  if (now <= graceEnd) {
+    const graceDaysLeft = Math.max(0, Math.ceil((graceEnd - now) / (1000 * 60 * 60 * 24)))
+    return { active: true, inGrace: true, graceDaysLeft, daysLeft: 0, expiryDate: expiry.toISOString() }
+  }
+
+  return { active: false, daysLeft: 0, expiryDate: expiry.toISOString() }
 }
 
-module.exports = { getMachineId, validateKey, checkTrial }
+/**
+ * Decrypt an encrypted .lic file buffer into the parsed license object.
+ * File layout: [4-byte magic 'CSL1'][12-byte IV][16-byte authTag][ciphertext].
+ * @param {Buffer} buf - raw bytes read from the .lic file
+ * @returns {object} parsed license JSON ({ machineId, expiry, sig })
+ * @throws if the file is not a valid encrypted license
+ */
+function decryptLicenseFile(buf) {
+  if (!Buffer.isBuffer(buf) || buf.length < 32) {
+    throw new Error('License file is not a valid CornerShop license')
+  }
+  if (!buf.slice(0, 4).equals(LICENSE_FILE_MAGIC)) {
+    throw new Error('License file is not a valid CornerShop license')
+  }
+  const iv         = buf.slice(4, 16)
+  const authTag    = buf.slice(16, 32)
+  const ciphertext = buf.slice(32)
+
+  const decipher = crypto.createDecipheriv('aes-256-gcm', LICENSE_CIPHER_KEY, iv)
+  decipher.setAuthTag(authTag)
+  const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()])
+  return JSON.parse(plaintext.toString('utf8'))
+}
+
+/**
+ * Encrypt a license object into the binary .lic file format. Only the keygen
+ * tool calls this — exported so both sides share the exact layout.
+ * @param {object} license - { machineId, expiry, sig }
+ * @returns {Buffer}
+ */
+function encryptLicenseFile(license) {
+  const iv = crypto.randomBytes(12)
+  const cipher = crypto.createCipheriv('aes-256-gcm', LICENSE_CIPHER_KEY, iv)
+  const plaintext = Buffer.from(JSON.stringify(license), 'utf8')
+  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()])
+  const authTag = cipher.getAuthTag()
+  return Buffer.concat([LICENSE_FILE_MAGIC, iv, authTag, ciphertext])
+}
+
+module.exports = { getMachineId, validateKey, checkTrial, decryptLicenseFile, encryptLicenseFile }

@@ -4,7 +4,7 @@ const { app, BrowserWindow, ipcMain, dialog } = require('electron')
 const path = require('path')
 const bcrypt = require('bcryptjs')
 const { initDatabase } = require('./src/database/db')
-const { getMachineId, validateKey, checkTrial } = require('./src/license')
+const { getMachineId, validateKey, checkTrial, decryptLicenseFile } = require('./src/license')
 const { autoUpdater } = require('electron-updater')
 
 let db
@@ -666,7 +666,15 @@ ipcMain.handle('license:check', wrap(() => {
       const license = JSON.parse(s.license_key)
       const result = validateKey(license, machineId)
       if (result.valid) {
-        return { success: true, status: 'licensed', daysLeft: result.daysLeft, expiryDate: result.expiryDate }
+        return {
+          success: true,
+          status: 'licensed',
+          daysLeft: result.daysLeft,
+          expiryDate: result.expiryDate,
+          inGrace: !!result.inGrace,
+          graceDaysLeft: result.graceDaysLeft,
+          machineId
+        }
       }
     } catch { /* corrupt stored value — fall through */ }
     // Invalid/expired/wrong machine — fall through to trial check
@@ -689,7 +697,15 @@ ipcMain.handle('license:check', wrap(() => {
 
   const trial = checkTrial(s.trial_start)
   if (trial.active) {
-    return { success: true, status: 'trial', daysLeft: trial.daysLeft, expiryDate: trial.expiryDate, machineId }
+    return {
+      success: true,
+      status: 'trial',
+      daysLeft: trial.daysLeft,
+      expiryDate: trial.expiryDate,
+      inGrace: !!trial.inGrace,
+      graceDaysLeft: trial.graceDaysLeft,
+      machineId
+    }
   }
 
   return { success: true, status: 'expired', daysLeft: 0, expiryDate: trial.expiryDate, machineId }
@@ -706,7 +722,7 @@ ipcMain.handle('license:importFile', async () => {
   let license
   try {
     const fs = require('fs')
-    license = JSON.parse(fs.readFileSync(filePaths[0], 'utf8'))
+    license = decryptLicenseFile(fs.readFileSync(filePaths[0]))
   } catch {
     return { success: false, error: 'Could not read license file' }
   }

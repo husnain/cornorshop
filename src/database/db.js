@@ -124,6 +124,18 @@ function initDatabase(dbPath) {
     )
   `)
 
+  // Daily opening balance (cash float at start of each business day)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS opening_balance_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      business_date DATE NOT NULL UNIQUE,
+      amount REAL NOT NULL DEFAULT 0,
+      notes TEXT,
+      recorded_by TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+
   // Seed default settings (INSERT OR IGNORE — won't overwrite existing values)
   db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('currency_code', 'PKR')").run()
   db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('currency_symbol', '₨')").run()

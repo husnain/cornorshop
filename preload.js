@@ -26,7 +26,9 @@ contextBridge.exposeInMainWorld('api', {
 
   suppliers: {
     getAll: () => ipcRenderer.invoke('suppliers:getAll'),
-    create: (data) => ipcRenderer.invoke('suppliers:create', data)
+    create: (data) => ipcRenderer.invoke('suppliers:create', data),
+    update: (data) => ipcRenderer.invoke('suppliers:update', data),
+    delete: (id) => ipcRenderer.invoke('suppliers:delete', id)
   },
 
   deliveries: {
@@ -70,6 +72,12 @@ contextBridge.exposeInMainWorld('api', {
   waste: {
     log: (data) => ipcRenderer.invoke('waste:log', data),
     getAll: () => ipcRenderer.invoke('waste:getAll')
+  },
+
+  openingBalance: {
+    getToday: () => ipcRenderer.invoke('openingBalance:getToday'),
+    set: (data) => ipcRenderer.invoke('openingBalance:set', data),
+    getHistory: () => ipcRenderer.invoke('openingBalance:getHistory')
   },
 
   license: {

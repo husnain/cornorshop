@@ -18,6 +18,36 @@ const Dashboard = {
       ? ((s.today_profit / s.today_sales) * 100).toFixed(1)
       : '0.0'
 
+    // Opening balance banner
+    const ob = s.opening_balance
+    const cashPosition = ob ? (ob.amount + s.today_cash_sales) : null
+    let openingBalanceBanner
+    if (!ob) {
+      openingBalanceBanner = `
+        <div class="ob-banner ob-banner-unset">
+          <div class="ob-banner-left">
+            <span class="ob-banner-icon">💵</span>
+            <div>
+              <div class="ob-banner-title">Opening Balance Not Set</div>
+              <div class="ob-banner-sub">Record today's starting cash to track your cash position</div>
+            </div>
+          </div>
+          <button class="btn btn-primary" onclick="Dashboard.showSetOpeningBalance()">Set Opening Balance</button>
+        </div>`
+    } else {
+      openingBalanceBanner = `
+        <div class="ob-banner ob-banner-set">
+          <div class="ob-banner-left">
+            <span class="ob-banner-icon">💵</span>
+            <div>
+              <div class="ob-banner-title">Opening Balance: <strong>${fc(ob.amount)}</strong></div>
+              <div class="ob-banner-sub">Cash Position: <strong>${fc(cashPosition)}</strong> (opening + cash sales)${ob.notes ? ' · ' + ob.notes : ''}</div>
+            </div>
+          </div>
+          <button class="btn btn-sm btn-secondary" onclick="Dashboard.showSetOpeningBalance()">Update</button>
+        </div>`
+    }
+
     const topProductsRows = (s.top_products || []).map((p, i) => `
       <tr>
         <td><span class="badge badge-secondary">${i + 1}</span></td>
@@ -76,6 +106,9 @@ const Dashboard = {
           <button class="btn btn-secondary" onclick="App.navigate('deliveries')">🚚 Record Delivery</button>
         </div>
       </div>
+
+      <!-- Opening Balance -->
+      ${openingBalanceBanner}
 
       <!-- Stat Cards -->
       <div class="stats-grid">
@@ -205,5 +238,45 @@ const Dashboard = {
         </div>
       </div>
     `
+  },
+
+  showSetOpeningBalance() {
+    const body = `
+      <div class="form-group">
+        <label for="ob-amount">Opening Cash Amount</label>
+        <input type="number" id="ob-amount" class="form-control" placeholder="e.g. 5000" min="0" step="any" autofocus>
+      </div>
+      <div class="form-group">
+        <label for="ob-notes">Notes <span style="color:var(--text-muted);font-weight:400">(optional)</span></label>
+        <input type="text" id="ob-notes" class="form-control" placeholder="e.g. From yesterday's closing">
+      </div>
+    `
+    const footer = `
+      <button class="btn btn-secondary" onclick="App.closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="Dashboard.saveOpeningBalance()">Save</button>
+    `
+    App.showModal('Set Opening Balance', body, footer, { size: 'sm' })
+    document.getElementById('ob-amount').focus()
+    document.getElementById('ob-amount').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') Dashboard.saveOpeningBalance()
+    })
+  },
+
+  async saveOpeningBalance() {
+    const amountEl = document.getElementById('ob-amount')
+    const notesEl = document.getElementById('ob-notes')
+    const amount = parseFloat(amountEl.value)
+    if (isNaN(amount) || amount < 0) {
+      App.showToast('Please enter a valid amount', 'error')
+      return
+    }
+    const res = await window.api.openingBalance.set({ amount, notes: notesEl.value.trim() })
+    if (res.success) {
+      App.closeModal()
+      App.showToast('Opening balance saved', 'success')
+      Dashboard.render()
+    } else {
+      App.showToast('Failed to save opening balance', 'error')
+    }
   }
 }

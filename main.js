@@ -294,6 +294,20 @@ ipcMain.handle('suppliers:create', wrap((data) => {
   return { success: true, supplier }
 }))
 
+ipcMain.handle('suppliers:update', wrap((data) => {
+  const { id, name, phone, address } = data
+  db.prepare('UPDATE suppliers SET name = ?, phone = ?, address = ? WHERE id = ?').run(name, phone || null, address || null, id)
+  const supplier = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(id)
+  return { success: true, supplier }
+}))
+
+ipcMain.handle('suppliers:delete', wrap((id) => {
+  const inUse = db.prepare('SELECT 1 FROM deliveries WHERE supplier_id = ? LIMIT 1').get(id)
+  if (inUse) return { success: false, error: 'Cannot delete a supplier that has deliveries linked to it.' }
+  db.prepare('DELETE FROM suppliers WHERE id = ?').run(id)
+  return { success: true }
+}))
+
 // ─── Deliveries ───────────────────────────────────────────────────────────────
 ipcMain.handle('deliveries:getAll', wrap(() => {
   const deliveries = db.prepare(`
@@ -424,11 +438,21 @@ ipcMain.handle('sales:getByDate', wrap(({ start, end }) => {
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 ipcMain.handle('dashboard:getStats', wrap(() => {
+  const todayOpeningBalance = db.prepare(`
+    SELECT * FROM opening_balance_log WHERE business_date = date('now','localtime')
+  `).get()
+
   const todaySales = db.prepare(`
     SELECT COALESCE(SUM(total), 0) AS today_sales,
            COUNT(*) AS today_transactions
     FROM sales
     WHERE date(sale_date) = date('now','localtime')
+  `).get()
+
+  const todayCashSales = db.prepare(`
+    SELECT COALESCE(SUM(total), 0) AS cash_sales
+    FROM sales
+    WHERE date(sale_date) = date('now','localtime') AND payment_method = 'cash'
   `).get()
 
   const todayProfit = db.prepare(`
@@ -520,6 +544,8 @@ ipcMain.handle('dashboard:getStats', wrap(() => {
   return {
     success: true,
     stats: {
+      opening_balance: todayOpeningBalance || null,
+      today_cash_sales: todayCashSales.cash_sales,
       today_sales: todaySales.today_sales,
       today_transactions: todaySales.today_transactions,
       today_profit: todayProfit.today_profit,
@@ -537,6 +563,35 @@ ipcMain.handle('dashboard:getStats', wrap(() => {
       recent_sales: recentSales
     }
   }
+}))
+
+// ─── Opening Balance ───────────────────────────────────────────────────────────
+ipcMain.handle('openingBalance:getToday', wrap(() => {
+  const record = db.prepare(`
+    SELECT * FROM opening_balance_log WHERE business_date = date('now','localtime')
+  `).get()
+  return { success: true, record: record || null }
+}))
+
+ipcMain.handle('openingBalance:set', wrap((data) => {
+  const { amount, notes } = data
+  const recordedBy = currentUser ? currentUser.name : null
+  db.prepare(`
+    INSERT INTO opening_balance_log (business_date, amount, notes, recorded_by)
+    VALUES (date('now','localtime'), ?, ?, ?)
+    ON CONFLICT(business_date) DO UPDATE SET amount = excluded.amount, notes = excluded.notes, recorded_by = excluded.recorded_by
+  `).run(amount || 0, notes || null, recordedBy)
+  const record = db.prepare(`
+    SELECT * FROM opening_balance_log WHERE business_date = date('now','localtime')
+  `).get()
+  return { success: true, record }
+}))
+
+ipcMain.handle('openingBalance:getHistory', wrap(() => {
+  const records = db.prepare(`
+    SELECT * FROM opening_balance_log ORDER BY business_date DESC LIMIT 30
+  `).all()
+  return { success: true, records }
 }))
 
 // ─── Reports ──────────────────────────────────────────────────────────────────

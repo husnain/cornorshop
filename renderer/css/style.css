@@ -1420,3 +1420,43 @@ select { cursor: pointer; }
   font-weight: 600;
   color: #111827;
 }
+
+/* ── Opening Balance Banner ─────────────────────────────────────────────────── */
+.ob-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 20px;
+  border-radius: var(--radius);
+  margin-bottom: 20px;
+  border-left: 4px solid transparent;
+}
+.ob-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.ob-banner-icon {
+  font-size: 24px;
+  line-height: 1;
+}
+.ob-banner-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.ob-banner-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.ob-banner-unset {
+  background: #fef9c3;
+  border-left-color: #eab308;
+}
+.ob-banner-set {
+  background: var(--card);
+  border-left-color: #6f42c1;
+  box-shadow: var(--shadow-sm);
+}

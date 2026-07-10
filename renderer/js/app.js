@@ -72,6 +72,7 @@ const App = {
       pos: () => POS.render(),
       deliveries: () => Deliveries.render(),
       reports: () => Reports.render(),
+      suppliers: () => Suppliers.render(),
       users: () => Users.render(),
       settings: () => Settings.render(),
       waste: () => Waste.render()
@@ -149,6 +150,7 @@ const App = {
       { view: 'deliveries', icon: '🚚', label: 'Deliveries', ownerOnly: true },
       { view: 'reports', icon: '📈', label: 'Reports', ownerOnly: true },
       { view: 'waste', icon: '🗑️', label: 'Waste Log', ownerOnly: true },
+      { view: 'suppliers', icon: '🏭', label: 'Suppliers', ownerOnly: true },
       { view: 'users', icon: '👥', label: 'Users', ownerOnly: true },
       { view: 'settings', icon: '⚙️', label: 'Settings', ownerOnly: true }
     ]
@@ -219,7 +221,7 @@ const App = {
     overlay.style.display = 'flex'
 
     document.getElementById('modal-close').onclick = App.closeModal
-    overlay.onclick = (e) => { if (e.target === overlay) App.closeModal() }
+    overlay.onclick = null
 
     return { bodyEl, footerEl }
   },

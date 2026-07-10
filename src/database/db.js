@@ -124,6 +124,37 @@ function initDatabase(dbPath) {
     )
   `)
 
+  // Vendor payments (money paid to suppliers)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS vendor_payments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      supplier_id INTEGER REFERENCES suppliers(id),
+      supplier_name TEXT NOT NULL,
+      delivery_id INTEGER REFERENCES deliveries(id),
+      amount REAL NOT NULL,
+      payment_method TEXT DEFAULT 'cash',
+      payment_date DATE NOT NULL,
+      notes TEXT,
+      recorded_by TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+
+  // General business expenses (rent, utilities, wages, etc.)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS expenses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      category TEXT NOT NULL DEFAULT 'Other',
+      description TEXT NOT NULL,
+      amount REAL NOT NULL,
+      payment_method TEXT DEFAULT 'cash',
+      expense_date DATE NOT NULL,
+      notes TEXT,
+      recorded_by TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+
   // Daily opening balance (cash float at start of each business day)
   db.exec(`
     CREATE TABLE IF NOT EXISTS opening_balance_log (

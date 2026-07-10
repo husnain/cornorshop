@@ -3,6 +3,7 @@
 const Reports = {
   startDate: '',
   endDate: '',
+  _data: null,
 
   async render() {
     const content = document.getElementById('content')
@@ -35,11 +36,12 @@ const Reports = {
             <label>End Date</label>
             <input type="date" id="report-end" value="${Reports.endDate}" style="width:160px">
           </div>
-          <div style="display:flex;gap:8px">
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn btn-primary" id="btn-generate-report">📊 Generate Report</button>
             <button class="btn btn-secondary" onclick="Reports.setPreset('today')">Today</button>
             <button class="btn btn-secondary" onclick="Reports.setPreset('week')">This Week</button>
             <button class="btn btn-secondary" onclick="Reports.setPreset('month')">This Month</button>
+            <button class="btn btn-secondary" id="btn-export-csv" onclick="Reports.exportCSV()">⬇ Export CSV</button>
           </div>
         </div>
       </div>
@@ -86,6 +88,70 @@ const Reports = {
     Reports.loadReport()
   },
 
+  async exportCSV() {
+    if (!Reports._data) {
+      App.showToast('Generate a report first', 'warning')
+      return
+    }
+
+    const { daily, totals, expensesByCategory } = Reports._data
+    const netProfit = totals.total_profit - (totals.total_expenses || 0)
+
+    const esc = v => {
+      const s = String(v == null ? '' : v)
+      return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s
+    }
+    const row = (...cols) => cols.map(esc).join(',')
+
+    const lines = []
+
+    lines.push(row('Report Period', `${Reports.startDate} to ${Reports.endDate}`))
+    lines.push(row('Generated', new Date().toLocaleString()))
+    lines.push('')
+
+    lines.push(row('SUMMARY'))
+    lines.push(row('Total Revenue', totals.total_revenue))
+    lines.push(row('Cost of Goods Sold', totals.total_cost))
+    lines.push(row('Gross Profit', totals.total_profit))
+    lines.push(row('Total Expenses', totals.total_expenses || 0))
+    lines.push(row('Net Profit', netProfit))
+    lines.push(row('Total Transactions', totals.total_transactions))
+    lines.push('')
+
+    lines.push(row('DAILY BREAKDOWN'))
+    lines.push(row('Date', 'Transactions', 'Revenue', 'Cost of Goods', 'Gross Profit', 'Margin %'))
+    for (const d of daily) {
+      const margin = d.revenue > 0 ? ((d.profit / d.revenue) * 100).toFixed(1) : '0.0'
+      lines.push(row(d.sale_day, d.transactions, d.revenue, d.cost, d.profit, margin))
+    }
+    lines.push('')
+
+    if ((expensesByCategory || []).length > 0) {
+      lines.push(row('EXPENSES BY CATEGORY'))
+      lines.push(row('Category', 'Amount'))
+      for (const e of expensesByCategory) {
+        lines.push(row(e.category, e.total))
+      }
+      lines.push('')
+    }
+
+    const csv = lines.join('\r\n')
+    const defaultName = `report-${Reports.startDate}-to-${Reports.endDate}.csv`
+
+    const btn = document.getElementById('btn-export-csv')
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving...' }
+
+    const res = await window.api.reports.saveCSV({ csv, defaultName })
+
+    if (btn) { btn.disabled = false; btn.textContent = '⬇ Export CSV' }
+
+    if (res.success) {
+      App.showToast('Report saved successfully', 'success')
+    } else if (res.error !== 'Cancelled') {
+      App.showToast(res.error || 'Failed to save report', 'error')
+    }
+  },
+
   async loadReport() {
     const reportContent = document.getElementById('report-content')
     if (!reportContent) return
@@ -102,11 +168,16 @@ const Reports = {
       return
     }
 
-    const { daily, totals } = res
+    const { daily, totals, expensesByCategory } = res
+    Reports._data = { daily, totals, expensesByCategory }
     const fc = App.formatCurrency
 
+    const netProfit = totals.total_profit - (totals.total_expenses || 0)
     const profitMargin = totals.total_revenue > 0
       ? ((totals.total_profit / totals.total_revenue) * 100).toFixed(1)
+      : '0.0'
+    const netMargin = totals.total_revenue > 0
+      ? ((netProfit / totals.total_revenue) * 100).toFixed(1)
       : '0.0'
 
     // Build bar chart
@@ -141,6 +212,13 @@ const Reports = {
       </tr>
     `
 
+    const expenseCatRows = (expensesByCategory || []).map(e => `
+      <tr>
+        <td><span class="badge badge-primary">${e.category}</span></td>
+        <td class="text-right" style="font-weight:600">${fc(e.total)}</td>
+      </tr>
+    `).join('') || `<tr><td colspan="2" style="color:var(--text-muted);padding:8px 0">No expenses in this period</td></tr>`
+
     reportContent.innerHTML = `
       <!-- Summary Cards -->
       <div class="stats-grid mb-2">
@@ -152,7 +230,7 @@ const Reports = {
         </div>
         <div class="stat-card">
           <div class="stat-icon">📦</div>
-          <div class="stat-label">Total Cost</div>
+          <div class="stat-label">Cost of Goods</div>
           <div class="stat-value">${fc(totals.total_cost)}</div>
           <div class="stat-sub">Cost of goods sold</div>
         </div>
@@ -160,15 +238,40 @@ const Reports = {
           <div class="stat-icon">📈</div>
           <div class="stat-label">Gross Profit</div>
           <div class="stat-value">${fc(totals.total_profit)}</div>
-          <div class="stat-sub">Revenue minus cost</div>
+          <div class="stat-sub">Margin: ${profitMargin}%</div>
         </div>
-        <div class="stat-card purple">
-          <div class="stat-icon">%</div>
-          <div class="stat-label">Profit Margin</div>
-          <div class="stat-value">${profitMargin}%</div>
-          <div class="stat-sub">Gross margin</div>
+        <div class="stat-card orange">
+          <div class="stat-icon">🧾</div>
+          <div class="stat-label">Expenses</div>
+          <div class="stat-value">${fc(totals.total_expenses || 0)}</div>
+          <div class="stat-sub">${totals.expense_count || 0} expense${(totals.expense_count || 0) !== 1 ? 's' : ''}</div>
+        </div>
+        <div class="stat-card ${netProfit >= 0 ? 'green' : 'red'}" style="grid-column:span 2">
+          <div class="stat-icon">${netProfit >= 0 ? '✅' : '⚠️'}</div>
+          <div class="stat-label">Net Profit</div>
+          <div class="stat-value">${fc(netProfit)}</div>
+          <div class="stat-sub">Gross profit minus expenses &nbsp;|&nbsp; Net margin: ${netMargin}%</div>
         </div>
       </div>
+
+      <!-- Expenses Breakdown -->
+      ${(expensesByCategory || []).length > 0 ? `
+      <div class="card mb-2">
+        <div class="card-header"><div class="card-title">Expenses Breakdown</div></div>
+        <div class="card-body" style="max-width:400px">
+          <table>
+            <thead><tr><th>Category</th><th class="text-right">Total</th></tr></thead>
+            <tbody>${expenseCatRows}</tbody>
+            <tfoot>
+              <tr>
+                <td><strong>Total Expenses</strong></td>
+                <td class="text-right"><strong>${fc(totals.total_expenses || 0)}</strong></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+      ` : ''}
 
       <!-- Bar Chart -->
       ${daily.length > 0 ? `

@@ -50,7 +50,8 @@ contextBridge.exposeInMainWorld('api', {
 
   reports: {
     getDailyReport: (date) => ipcRenderer.invoke('reports:getDailyReport', date),
-    getSalesReport: (data) => ipcRenderer.invoke('reports:getSalesReport', data)
+    getSalesReport: (data) => ipcRenderer.invoke('reports:getSalesReport', data),
+    saveCSV: (data) => ipcRenderer.invoke('reports:saveCSV', data)
   },
 
   users: {
@@ -67,6 +68,20 @@ contextBridge.exposeInMainWorld('api', {
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
     set: (data) => ipcRenderer.invoke('settings:set', data)
+  },
+
+  vendorPayments: {
+    getAll: () => ipcRenderer.invoke('vendorPayments:getAll'),
+    create: (data) => ipcRenderer.invoke('vendorPayments:create', data),
+    delete: (id) => ipcRenderer.invoke('vendorPayments:delete', id),
+    getSupplierBalances: () => ipcRenderer.invoke('vendorPayments:getSupplierBalances')
+  },
+
+  expenses: {
+    getAll: () => ipcRenderer.invoke('expenses:getAll'),
+    getByDateRange: (data) => ipcRenderer.invoke('expenses:getByDateRange', data),
+    create: (data) => ipcRenderer.invoke('expenses:create', data),
+    delete: (id) => ipcRenderer.invoke('expenses:delete', id)
   },
 
   waste: {

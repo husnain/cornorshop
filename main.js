@@ -664,7 +664,30 @@ ipcMain.handle('reports:getSalesReport', wrap(({ start, end }) => {
     WHERE date(s.sale_date, 'localtime') BETWEEN date(?) AND date(?)
   `).get(start, end)
 
-  return { success: true, daily, totals }
+  const expenseTotals = db.prepare(`
+    SELECT COALESCE(SUM(amount), 0) AS total_expenses, COUNT(*) AS expense_count
+    FROM expenses
+    WHERE date(expense_date) BETWEEN date(?) AND date(?)
+  `).get(start, end)
+
+  const expensesByCategory = db.prepare(`
+    SELECT category, COALESCE(SUM(amount), 0) AS total
+    FROM expenses
+    WHERE date(expense_date) BETWEEN date(?) AND date(?)
+    GROUP BY category
+    ORDER BY total DESC
+  `).all(start, end)
+
+  return {
+    success: true,
+    daily,
+    totals: {
+      ...totals,
+      total_expenses: expenseTotals.total_expenses,
+      expense_count: expenseTotals.expense_count
+    },
+    expensesByCategory
+  }
 }))
 
 // ─── Users ────────────────────────────────────────────────────────────────────
@@ -790,6 +813,90 @@ ipcMain.handle('license:importFile', async () => {
   return { success: true, daysLeft: result.daysLeft, expiryDate: result.expiryDate }
 })
 
+// ─── Vendor Payments ─────────────────────────────────────────────────────────
+ipcMain.handle('vendorPayments:getAll', wrap(() => {
+  const payments = db.prepare(`
+    SELECT vp.*
+    FROM vendor_payments vp
+    ORDER BY vp.payment_date DESC, vp.created_at DESC
+  `).all()
+  return { success: true, payments }
+}))
+
+ipcMain.handle('vendorPayments:create', wrap((data) => {
+  const { supplier_id, supplier_name, delivery_id, amount, payment_method, payment_date, notes } = data
+  const recordedBy = currentUser ? currentUser.name : null
+  const result = db.prepare(`
+    INSERT INTO vendor_payments (supplier_id, supplier_name, delivery_id, amount, payment_method, payment_date, notes, recorded_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(supplier_id || null, supplier_name, delivery_id || null, amount, payment_method || 'cash', payment_date, notes || null, recordedBy)
+  const payment = db.prepare('SELECT * FROM vendor_payments WHERE id = ?').get(result.lastInsertRowid)
+  return { success: true, payment }
+}))
+
+ipcMain.handle('vendorPayments:delete', wrap((id) => {
+  db.prepare('DELETE FROM vendor_payments WHERE id = ?').run(id)
+  return { success: true }
+}))
+
+ipcMain.handle('vendorPayments:getSupplierBalances', wrap(() => {
+  const balances = db.prepare(`
+    SELECT
+      s.id, s.name,
+      COALESCE((SELECT SUM(d.total_cost) FROM deliveries d WHERE d.supplier_id = s.id), 0) AS total_purchased,
+      COALESCE((SELECT SUM(vp.amount) FROM vendor_payments vp WHERE vp.supplier_id = s.id), 0) AS total_paid
+    FROM suppliers s
+    ORDER BY s.name ASC
+  `).all()
+  return {
+    success: true,
+    balances: balances.map(b => ({ ...b, balance_due: b.total_purchased - b.total_paid }))
+  }
+}))
+
+// ─── Expenses ─────────────────────────────────────────────────────────────────
+ipcMain.handle('expenses:getAll', wrap(() => {
+  const expenses = db.prepare('SELECT * FROM expenses ORDER BY expense_date DESC, created_at DESC').all()
+  return { success: true, expenses }
+}))
+
+ipcMain.handle('expenses:getByDateRange', wrap(({ start, end }) => {
+  const expenses = db.prepare(`
+    SELECT * FROM expenses
+    WHERE date(expense_date) BETWEEN date(?) AND date(?)
+    ORDER BY expense_date DESC
+  `).all(start, end)
+  const totals = db.prepare(`
+    SELECT COALESCE(SUM(amount), 0) AS total_amount, COUNT(*) AS count
+    FROM expenses
+    WHERE date(expense_date) BETWEEN date(?) AND date(?)
+  `).get(start, end)
+  const byCategory = db.prepare(`
+    SELECT category, COALESCE(SUM(amount), 0) AS total
+    FROM expenses
+    WHERE date(expense_date) BETWEEN date(?) AND date(?)
+    GROUP BY category
+    ORDER BY total DESC
+  `).all(start, end)
+  return { success: true, expenses, totals, byCategory }
+}))
+
+ipcMain.handle('expenses:create', wrap((data) => {
+  const { category, description, amount, payment_method, expense_date, notes } = data
+  const recordedBy = currentUser ? currentUser.name : null
+  const result = db.prepare(`
+    INSERT INTO expenses (category, description, amount, payment_method, expense_date, notes, recorded_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(category || 'Other', description, amount, payment_method || 'cash', expense_date, notes || null, recordedBy)
+  const expense = db.prepare('SELECT * FROM expenses WHERE id = ?').get(result.lastInsertRowid)
+  return { success: true, expense }
+}))
+
+ipcMain.handle('expenses:delete', wrap((id) => {
+  db.prepare('DELETE FROM expenses WHERE id = ?').run(id)
+  return { success: true }
+}))
+
 // ─── Waste Log ────────────────────────────────────────────────────────────────
 ipcMain.handle('waste:log', wrap((data) => {
   const { product_id, quantity, reason, notes } = data
@@ -837,6 +944,19 @@ ipcMain.handle('settings:set', wrap((data) => {
   }
   return { success: true }
 }))
+
+// ─── Report Export ────────────────────────────────────────────────────────────
+ipcMain.handle('reports:saveCSV', async (_event, { csv, defaultName }) => {
+  const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+    title: 'Save Report',
+    defaultPath: defaultName || 'report.csv',
+    filters: [{ name: 'CSV Files', extensions: ['csv'] }]
+  })
+  if (canceled || !filePath) return { success: false, error: 'Cancelled' }
+  const fs = require('fs')
+  fs.writeFileSync(filePath, csv, 'utf-8')
+  return { success: true, filePath }
+})
 
 // ─── Receipt ──────────────────────────────────────────────────────────────────
 ipcMain.handle('receipt:print', wrap((saleData) => {

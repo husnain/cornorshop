@@ -127,6 +127,7 @@ const Deliveries = {
               <th>Product</th>
               <th>Quantity</th>
               <th>Unit Cost</th>
+              <th>Expiry Date</th>
               <th>Row Total</th>
               <th></th>
             </tr>
@@ -135,7 +136,7 @@ const Deliveries = {
           </tbody>
           <tfoot>
             <tr>
-              <td colspan="3" style="text-align:right"><strong>Grand Total:</strong></td>
+              <td colspan="4" style="text-align:right"><strong>Grand Total:</strong></td>
               <td id="del-grand-total" style="font-weight:700;color:var(--primary)">$0.00</td>
               <td></td>
             </tr>
@@ -193,6 +194,9 @@ const Deliveries = {
       </td>
       <td style="padding:6px 8px">
         <input type="number" class="del-cost" min="0" step="0.01" value="" style="width:90px" placeholder="0.00" data-row="${id}">
+      </td>
+      <td style="padding:6px 8px">
+        <input type="date" class="del-expiry" style="width:130px" data-row="${id}" title="Expiry date (optional — creates a tracked batch)">
       </td>
       <td style="padding:6px 8px;font-weight:600" class="del-row-total" id="del-row-total-${id}">$0.00</td>
       <td style="padding:6px 8px">
@@ -271,10 +275,12 @@ const Deliveries = {
 
       if (!productId || qty <= 0) continue
 
+      const expiry = tr.querySelector('.del-expiry')?.value || null
       items.push({
         product_id: Number(productId),
         quantity: qty,
-        unit_cost: cost
+        unit_cost: cost,
+        expiry_date: expiry || null
       })
     }
 
@@ -317,14 +323,30 @@ const Deliveries = {
     const d = res.delivery
     const items = d.items || []
 
-    const itemRows = items.map(item => `
-      <tr>
-        <td>${item.product_name}</td>
-        <td class="text-right">${Number(item.quantity).toFixed(1)}</td>
-        <td class="text-right">${App.formatCurrency(item.unit_cost)}</td>
-        <td class="text-right font-bold">${App.formatCurrency(item.quantity * item.unit_cost)}</td>
-      </tr>
-    `).join('')
+    const itemRows = items.map(item => {
+      let expiryHtml = '<span style="color:var(--text-muted)">—</span>'
+      if (item.expiry_date) {
+        const today = new Date(); today.setHours(0,0,0,0)
+        const exp = new Date(item.expiry_date); exp.setHours(0,0,0,0)
+        const daysLeft = Math.round((exp - today) / 86400000)
+        if (daysLeft < 0) {
+          expiryHtml = `<span class="badge badge-danger">Expired</span>`
+        } else if (daysLeft <= 30) {
+          expiryHtml = `<span class="badge badge-warning">${App.formatDate(item.expiry_date)}</span>`
+        } else {
+          expiryHtml = App.formatDate(item.expiry_date)
+        }
+      }
+      return `
+        <tr>
+          <td>${item.product_name}</td>
+          <td class="text-right">${Number(item.quantity).toFixed(1)}</td>
+          <td class="text-right">${App.formatCurrency(item.unit_cost)}</td>
+          <td>${expiryHtml}</td>
+          <td class="text-right font-bold">${App.formatCurrency(item.quantity * item.unit_cost)}</td>
+        </tr>
+      `
+    }).join('')
 
     const body = `
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
@@ -354,6 +376,7 @@ const Deliveries = {
               <th>Product</th>
               <th class="text-right">Quantity</th>
               <th class="text-right">Unit Cost</th>
+              <th>Expiry Date</th>
               <th class="text-right">Total</th>
             </tr>
           </thead>
@@ -362,7 +385,7 @@ const Deliveries = {
           </tbody>
           <tfoot>
             <tr>
-              <td colspan="3" class="text-right">Grand Total</td>
+              <td colspan="4" class="text-right">Grand Total</td>
               <td class="text-right font-bold">${App.formatCurrency(d.total_cost)}</td>
             </tr>
           </tfoot>

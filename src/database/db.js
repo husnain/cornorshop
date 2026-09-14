@@ -108,6 +108,39 @@ function initDatabase(dbPath) {
   // Expiry date per product (nullable — not all products have one)
   try { db.exec('ALTER TABLE products ADD COLUMN expiry_date DATE') } catch (_) {}
 
+  // Expiry date per delivery item (for batch tracking)
+  try { db.exec('ALTER TABLE delivery_items ADD COLUMN expiry_date DATE') } catch (_) {}
+
+  // Inventory ledger — every stock change leaves a timestamped row
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS stock_movements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      product_id INTEGER REFERENCES products(id),
+      product_name TEXT NOT NULL,
+      type TEXT NOT NULL CHECK(type IN ('restock','sale','waste','adjustment')),
+      quantity_change REAL NOT NULL,
+      quantity_after REAL NOT NULL,
+      reference_id INTEGER,
+      note TEXT,
+      created_by TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+
+  // Per-delivery batches with individual expiry dates (FEFO support)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS product_batches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      product_id INTEGER REFERENCES products(id),
+      delivery_id INTEGER REFERENCES deliveries(id),
+      quantity_received REAL NOT NULL,
+      quantity_remaining REAL NOT NULL,
+      expiry_date DATE,
+      cost_per_unit REAL,
+      received_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+
   // Waste / spoilage log
   db.exec(`
     CREATE TABLE IF NOT EXISTS waste_log (
@@ -166,6 +199,13 @@ function initDatabase(dbPath) {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `)
+
+  // Delivery order fields on sales
+  try { db.exec("ALTER TABLE sales ADD COLUMN order_type TEXT DEFAULT 'walk-in'") } catch (_) {}
+  try { db.exec('ALTER TABLE sales ADD COLUMN customer_name TEXT') } catch (_) {}
+  try { db.exec('ALTER TABLE sales ADD COLUMN customer_phone TEXT') } catch (_) {}
+  try { db.exec('ALTER TABLE sales ADD COLUMN delivery_address TEXT') } catch (_) {}
+  try { db.exec('ALTER TABLE sales ADD COLUMN delivery_charge REAL DEFAULT 0') } catch (_) {}
 
   // Seed default settings (INSERT OR IGNORE — won't overwrite existing values)
   db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('currency_code', 'PKR')").run()

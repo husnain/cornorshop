@@ -16,7 +16,16 @@ contextBridge.exposeInMainWorld('api', {
     delete: (id) => ipcRenderer.invoke('products:delete', id),
     search: (query) => ipcRenderer.invoke('products:search', query),
     getByBarcode: (barcode) => ipcRenderer.invoke('products:getByBarcode', barcode),
-    bulkImport: (data) => ipcRenderer.invoke('products:bulkImport', data)
+    bulkImport: (data) => ipcRenderer.invoke('products:bulkImport', data),
+    adjustStock: (data) => ipcRenderer.invoke('products:adjustStock', data)
+  },
+
+  stockMovements: {
+    getByProduct: (id) => ipcRenderer.invoke('stockMovements:getByProduct', id)
+  },
+
+  batches: {
+    getByProduct: (id) => ipcRenderer.invoke('batches:getByProduct', id)
   },
 
   categories: {

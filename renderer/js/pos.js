@@ -4,6 +4,7 @@ const POS = {
   cart: [],
   products: [],
   filteredProducts: [],
+  orderType: 'walk-in',
 
   async render() {
     const content = document.getElementById('content')
@@ -48,6 +49,37 @@ const POS = {
           </div>
 
           <div class="pos-cart-summary" id="cart-summary" style="display:none">
+            <!-- Order type toggle -->
+            <div style="display:flex;gap:6px;margin-bottom:8px">
+              <button id="btn-order-walkin" class="order-type-btn active" onclick="POS.setOrderType('walk-in')" style="flex:1;padding:6px;border-radius:6px;border:2px solid var(--primary);background:var(--primary);color:#fff;font-size:12px;font-weight:600;cursor:pointer">🏪 Walk-in</button>
+              <button id="btn-order-delivery" class="order-type-btn" onclick="POS.setOrderType('delivery')" style="flex:1;padding:6px;border-radius:6px;border:2px solid var(--border);background:var(--surface);color:var(--text);font-size:12px;font-weight:600;cursor:pointer">🛵 Delivery</button>
+            </div>
+
+            <!-- Delivery details (hidden by default) -->
+            <div id="delivery-section" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px;margin-bottom:8px">
+              <div style="font-size:11px;font-weight:700;color:var(--primary);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px">Delivery Details</div>
+              <div style="margin-bottom:6px">
+                <label style="font-size:11px;color:var(--text-muted)">Customer Name *</label>
+                <input type="text" id="delivery-customer-name" placeholder="Enter customer name"
+                  style="width:100%;padding:5px 8px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);box-sizing:border-box">
+              </div>
+              <div style="margin-bottom:6px">
+                <label style="font-size:11px;color:var(--text-muted)">Phone Number</label>
+                <input type="tel" id="delivery-phone" placeholder="e.g. 03001234567"
+                  style="width:100%;padding:5px 8px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);box-sizing:border-box">
+              </div>
+              <div style="margin-bottom:6px">
+                <label style="font-size:11px;color:var(--text-muted)">Delivery Address *</label>
+                <textarea id="delivery-address" placeholder="Enter full delivery address" rows="2"
+                  style="width:100%;padding:5px 8px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);resize:none;box-sizing:border-box"></textarea>
+              </div>
+              <div>
+                <label style="font-size:11px;color:var(--text-muted)">Delivery Charge</label>
+                <input type="number" id="delivery-charge" min="0" step="0.01" placeholder="0.00" value="0"
+                  style="width:100%;padding:5px 8px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);box-sizing:border-box">
+              </div>
+            </div>
+
             <div class="summary-row">
               <span>Subtotal</span>
               <span id="cart-subtotal">$0.00</span>
@@ -60,6 +92,10 @@ const POS = {
                   style="width:80px;padding:4px 8px;font-size:13px;text-align:right"
                   value="0">
               </span>
+            </div>
+            <div class="summary-row" id="delivery-charge-row" style="display:none;color:var(--primary)">
+              <span>🛵 Delivery Charge</span>
+              <span id="cart-delivery-charge">$0.00</span>
             </div>
             <div class="summary-row total">
               <span>TOTAL</span>
@@ -208,6 +244,9 @@ const POS = {
 
     document.getElementById('cart-discount').addEventListener('input', POS.updateTotals)
     document.getElementById('amount-paid').addEventListener('input', POS.updateChange)
+
+    // Delivery charge live update
+    document.getElementById('delivery-charge').addEventListener('input', POS.updateTotals)
     document.getElementById('amount-paid').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault()
@@ -227,6 +266,35 @@ const POS = {
         changeDisplay.style.display = 'none'
       }
     })
+  },
+
+  setOrderType(type) {
+    POS.orderType = type
+    const deliverySection = document.getElementById('delivery-section')
+    const deliveryChargeRow = document.getElementById('delivery-charge-row')
+    const btnWalkin = document.getElementById('btn-order-walkin')
+    const btnDelivery = document.getElementById('btn-order-delivery')
+
+    if (type === 'delivery') {
+      deliverySection.style.display = 'block'
+      deliveryChargeRow.style.display = 'flex'
+      btnDelivery.style.background = 'var(--primary)'
+      btnDelivery.style.color = '#fff'
+      btnDelivery.style.borderColor = 'var(--primary)'
+      btnWalkin.style.background = 'var(--surface)'
+      btnWalkin.style.color = 'var(--text)'
+      btnWalkin.style.borderColor = 'var(--border)'
+    } else {
+      deliverySection.style.display = 'none'
+      deliveryChargeRow.style.display = 'none'
+      btnWalkin.style.background = 'var(--primary)'
+      btnWalkin.style.color = '#fff'
+      btnWalkin.style.borderColor = 'var(--primary)'
+      btnDelivery.style.background = 'var(--surface)'
+      btnDelivery.style.color = 'var(--text)'
+      btnDelivery.style.borderColor = 'var(--border)'
+    }
+    POS.updateTotals()
   },
 
   addToCart(product) {
@@ -359,13 +427,18 @@ const POS = {
     const subtotal = POS.cart.reduce((s, item) => s + item.total_price, 0)
     const discountInput = document.getElementById('cart-discount')
     const discount = parseFloat(discountInput ? discountInput.value : 0) || 0
-    const total = Math.max(0, subtotal - discount)
+    const deliveryCharge = POS.orderType === 'delivery'
+      ? (parseFloat(document.getElementById('delivery-charge')?.value || 0) || 0)
+      : 0
+    const total = Math.max(0, subtotal - discount + deliveryCharge)
 
     const subtotalEl = document.getElementById('cart-subtotal')
     const totalEl = document.getElementById('cart-total')
+    const deliveryChargeEl = document.getElementById('cart-delivery-charge')
 
     if (subtotalEl) subtotalEl.textContent = App.formatCurrency(subtotal)
     if (totalEl) totalEl.textContent = App.formatCurrency(total)
+    if (deliveryChargeEl) deliveryChargeEl.textContent = App.formatCurrency(deliveryCharge)
 
     POS.updateChange()
   },
@@ -374,7 +447,10 @@ const POS = {
     const discountInput = document.getElementById('cart-discount')
     const subtotal = POS.cart.reduce((s, item) => s + item.total_price, 0)
     const discount = parseFloat(discountInput ? discountInput.value : 0) || 0
-    const total = Math.max(0, subtotal - discount)
+    const deliveryCharge = POS.orderType === 'delivery'
+      ? (parseFloat(document.getElementById('delivery-charge')?.value || 0) || 0)
+      : 0
+    const total = Math.max(0, subtotal - discount + deliveryCharge)
 
     const amountPaid = parseFloat(document.getElementById('amount-paid')?.value || 0) || 0
     const change = amountPaid - total
@@ -410,7 +486,27 @@ const POS = {
     const subtotal = POS.cart.reduce((s, item) => s + item.total_price, 0)
     const discountInput = document.getElementById('cart-discount')
     const discount = parseFloat(discountInput?.value || 0) || 0
-    const total = Math.max(0, subtotal - discount)
+
+    const isDelivery = POS.orderType === 'delivery'
+    const deliveryCharge = isDelivery ? (parseFloat(document.getElementById('delivery-charge')?.value || 0) || 0) : 0
+    const customerName = isDelivery ? document.getElementById('delivery-customer-name')?.value.trim() : ''
+    const customerPhone = isDelivery ? document.getElementById('delivery-phone')?.value.trim() : ''
+    const deliveryAddress = isDelivery ? document.getElementById('delivery-address')?.value.trim() : ''
+
+    if (isDelivery) {
+      if (!customerName) {
+        App.showToast('Customer name is required for delivery orders', 'error')
+        document.getElementById('delivery-customer-name')?.focus()
+        return
+      }
+      if (!deliveryAddress) {
+        App.showToast('Delivery address is required', 'error')
+        document.getElementById('delivery-address')?.focus()
+        return
+      }
+    }
+
+    const total = Math.max(0, subtotal - discount + deliveryCharge)
     const paymentMethod = document.getElementById('payment-method').value
     const amountPaidInput = document.getElementById('amount-paid')
     let amountPaid = parseFloat(amountPaidInput?.value || 0) || 0
@@ -439,6 +535,11 @@ const POS = {
       payment_method: paymentMethod,
       amount_paid: amountPaid,
       change_amount: changeAmount,
+      order_type: POS.orderType,
+      customer_name: customerName || null,
+      customer_phone: customerPhone || null,
+      delivery_address: deliveryAddress || null,
+      delivery_charge: deliveryCharge,
       items: POS.cart.map(item => ({
         product_id: item.product_id,
         product_name: item.product_name,
@@ -476,6 +577,18 @@ const POS = {
         document.getElementById('payment-method').value = 'cash'
         document.getElementById('cash-section').style.display = 'block'
         document.getElementById('change-display').style.display = 'none'
+
+        // Reset delivery fields
+        POS.orderType = 'walk-in'
+        POS.setOrderType('walk-in')
+        const dcInput = document.getElementById('delivery-charge')
+        if (dcInput) dcInput.value = '0'
+        const nameInput = document.getElementById('delivery-customer-name')
+        if (nameInput) nameInput.value = ''
+        const phoneInput = document.getElementById('delivery-phone')
+        if (phoneInput) phoneInput.value = ''
+        const addrInput = document.getElementById('delivery-address')
+        if (addrInput) addrInput.value = ''
       } else {
         App.showToast(res.error || 'Failed to complete sale', 'error')
         btn.disabled = false
@@ -501,6 +614,17 @@ const POS = {
       </tr>
     `).join('')
 
+    const isDelivery = sale.order_type === 'delivery'
+    const deliveryInfoBlock = isDelivery ? `
+      <hr class="receipt-divider">
+      <div style="font-size:12px;background:var(--surface);border-radius:6px;padding:6px 8px">
+        <div style="font-weight:700;color:var(--primary);margin-bottom:4px">🛵 Delivery Order</div>
+        ${sale.customer_name ? `<div><b>Customer:</b> ${sale.customer_name}</div>` : ''}
+        ${sale.customer_phone ? `<div><b>Phone:</b> ${sale.customer_phone}</div>` : ''}
+        ${sale.delivery_address ? `<div><b>Address:</b> ${sale.delivery_address}</div>` : ''}
+      </div>
+    ` : ''
+
     const body = `
       <div class="receipt-preview">
         <div class="receipt-header">
@@ -515,6 +639,7 @@ const POS = {
           </div>
           <div>Cashier: ${sale.cashier_name}</div>
         </div>
+        ${deliveryInfoBlock}
         <hr class="receipt-divider">
         <div class="receipt-items">
           <table width="100%">
@@ -537,6 +662,7 @@ const POS = {
             <span>Subtotal</span><span>${fc(sale.subtotal)}</span>
           </div>
           ${sale.discount > 0 ? `<div style="display:flex;justify-content:space-between;color:var(--danger)"><span>Discount</span><span>-${fc(sale.discount)}</span></div>` : ''}
+          ${isDelivery && sale.delivery_charge > 0 ? `<div style="display:flex;justify-content:space-between;color:var(--primary)"><span>🛵 Delivery</span><span>+${fc(sale.delivery_charge)}</span></div>` : ''}
           <div style="display:flex;justify-content:space-between;font-size:16px;font-weight:700;margin-top:6px;padding-top:6px;border-top:1px solid var(--border)">
             <span>TOTAL</span><span>${fc(sale.total)}</span>
           </div>

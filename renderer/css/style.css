@@ -1109,6 +1109,34 @@ select { cursor: pointer; }
   flex-wrap: wrap;
 }
 
+/* ─── Report Tabs ───────────────────────────────────────────────────────────── */
+.report-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 2px solid var(--border);
+  margin-bottom: 16px;
+}
+
+.report-tab-btn {
+  padding: 10px 22px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  transition: var(--transition);
+}
+
+.report-tab-btn:hover { color: var(--primary); background: var(--border-light); }
+.report-tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+
+.report-tab-panel { display: none; }
+.report-tab-panel.active { display: block; }
+
 /* ─── Report Charts ─────────────────────────────────────────────────────────── */
 .bar-chart {
   display: flex;

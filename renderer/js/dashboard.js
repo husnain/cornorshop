@@ -68,7 +68,9 @@ const Dashboard = {
     `).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px">No sales today</td></tr>'
 
     const lowStockClass = s.low_stock_count > 0 ? 'red' : 'green'
-    const expiryClass = (s.expired_count > 0) ? 'red' : (s.expiring_soon_count > 0 ? 'orange' : 'green')
+    const totalExpired = s.expired_count + (s.batch_expired_count || 0)
+    const totalExpiringSoon = s.expiring_soon_count + (s.batch_expiring_soon_count || 0)
+    const expiryClass = totalExpired > 0 ? 'red' : (totalExpiringSoon > 0 ? 'orange' : 'green')
 
     // Alerts panel rows
     const lowStockAlertRows = (s.low_stock_items || []).map(p => `
@@ -79,7 +81,22 @@ const Dashboard = {
       </div>
     `).join('') || '<div style="color:var(--text-muted);font-size:13px;padding:8px 0">All products are well stocked.</div>'
 
-    const expiryAlertRows = (s.expiry_alerts || []).map(a => {
+    // Merge batch alerts (granular) + product-level alerts (dedup by product_id)
+    const batchAlerts = s.batch_expiry_alerts || []
+    const batchProductIds = new Set(batchAlerts.map(a => a.product_id))
+    const productAlerts = (s.expiry_alerts || []).filter(a => !batchProductIds.has(a.id))
+
+    const allExpiryAlerts = [
+      ...batchAlerts.map(a => ({
+        name: a.product_name,
+        expiry_date: a.expiry_date,
+        days_left: a.days_left,
+        detail: `${Number(a.quantity_remaining).toFixed(1)} ${a.unit} remaining`
+      })),
+      ...productAlerts.map(a => ({ name: a.name, expiry_date: a.expiry_date, days_left: a.days_left, detail: null }))
+    ].sort((a, b) => a.days_left - b.days_left)
+
+    const expiryAlertRows = allExpiryAlerts.map(a => {
       const badge = a.days_left < 0
         ? `<span class="badge badge-danger">Expired</span>`
         : a.days_left <= 7
@@ -88,7 +105,7 @@ const Dashboard = {
       return `
         <div class="alert-row">
           <span class="alert-name">${a.name}</span>
-          <span class="alert-detail">${App.formatDate(a.expiry_date)}</span>
+          <span class="alert-detail">${App.formatDate(a.expiry_date)}${a.detail ? ' · ' + a.detail : ''}</span>
           ${badge}
         </div>
       `
@@ -133,8 +150,8 @@ const Dashboard = {
         <div class="stat-card ${expiryClass}">
           <div class="stat-icon">🗓️</div>
           <div class="stat-label">Expiry Alerts</div>
-          <div class="stat-value">${s.expired_count + s.expiring_soon_count}</div>
-          <div class="stat-sub">${s.expired_count} expired · ${s.expiring_soon_count} expiring soon</div>
+          <div class="stat-value">${totalExpired + totalExpiringSoon}</div>
+          <div class="stat-sub">${totalExpired} expired · ${totalExpiringSoon} expiring soon</div>
         </div>
       </div>
 

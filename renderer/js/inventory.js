@@ -130,24 +130,26 @@ const Inventory = {
         : '0.0'
       const marginClass = Number(margin) > 0 ? 'margin-positive' : (Number(margin) < 0 ? 'margin-negative' : 'margin-zero')
 
-      // Expiry cell
+      // Expiry cell — prefer nearest active batch expiry, fall back to product-level expiry
+      const effectiveExpiry = p.nearest_batch_expiry || p.expiry_date
       let expiryCell = '<span style="color:var(--text-muted)">—</span>'
-      if (p.expiry_date) {
+      if (effectiveExpiry) {
         const today = new Date(); today.setHours(0,0,0,0)
-        const exp = new Date(p.expiry_date); exp.setHours(0,0,0,0)
+        const exp = new Date(effectiveExpiry); exp.setHours(0,0,0,0)
         const daysLeft = Math.round((exp - today) / 86400000)
+        const label = p.nearest_batch_expiry ? 'batch' : ''
         if (daysLeft < 0) {
           expiryCell = `<span class="badge badge-danger">Expired</span>`
         } else if (daysLeft <= 7) {
           expiryCell = `<span class="badge badge-danger">${daysLeft}d left</span>`
         } else if (daysLeft <= 30) {
-          expiryCell = `<span class="badge badge-warning">${daysLeft}d left</span>`
+          expiryCell = `<span class="badge badge-warning">${daysLeft}d left${label ? ' · ' + label : ''}</span>`
         } else {
-          expiryCell = `<span style="color:var(--text-muted);font-size:12px">${App.formatDate(p.expiry_date)}</span>`
+          expiryCell = `<span style="color:var(--text-muted);font-size:12px">${App.formatDate(effectiveExpiry)}${label ? ' <em style="opacity:.6">(batch)</em>' : ''}</span>`
         }
       }
 
-      const isExpired = p.expiry_date && new Date(p.expiry_date) < new Date()
+      const isExpired = effectiveExpiry && new Date(effectiveExpiry) < new Date()
       const rowClass = isExpired ? 'low-stock-row' : (isLow ? 'low-stock-row' : '')
 
       return `
@@ -175,6 +177,7 @@ const Inventory = {
           <td class="text-center">
             <div style="display:flex;gap:6px;justify-content:center">
               <button class="btn btn-sm btn-secondary" onclick="Inventory.showProductModal(${p.id})">Edit</button>
+              <button class="btn btn-sm btn-secondary" onclick="Inventory.showHistory(${p.id})" title="View stock history & batches">History</button>
               <button class="btn btn-sm btn-warning" onclick="Waste.showLogModal(${p.id})" title="Log waste/spoilage">Waste</button>
               <button class="btn btn-sm btn-danger" onclick="Inventory.deleteProduct(${p.id})">Del</button>
             </div>
@@ -668,6 +671,189 @@ const Inventory = {
           await Inventory.render()
         }
       })
+    })
+  },
+
+  async showHistory(id) {
+    const product = Inventory.products.find(p => p.id === id)
+    if (!product) return
+
+    const [movRes, batchRes] = await Promise.all([
+      window.api.stockMovements.getByProduct(id),
+      window.api.batches.getByProduct(id)
+    ])
+
+    const batches = batchRes.batches || []
+    const movements = movRes.movements || []
+
+    const batchRows = batches.length ? batches.map(b => {
+      const today = new Date(); today.setHours(0,0,0,0)
+      let expiryHtml = '<span style="color:var(--text-muted)">—</span>'
+      if (b.expiry_date) {
+        const exp = new Date(b.expiry_date); exp.setHours(0,0,0,0)
+        const daysLeft = Math.round((exp - today) / 86400000)
+        if (daysLeft < 0) {
+          expiryHtml = `<span class="badge badge-danger">Expired · ${App.formatDate(b.expiry_date)}</span>`
+        } else if (daysLeft <= 7) {
+          expiryHtml = `<span class="badge badge-danger">${App.formatDate(b.expiry_date)} · ${daysLeft}d left</span>`
+        } else if (daysLeft <= 30) {
+          expiryHtml = `<span class="badge badge-warning">${App.formatDate(b.expiry_date)} · ${daysLeft}d left</span>`
+        } else {
+          expiryHtml = `<span style="font-size:12px">${App.formatDate(b.expiry_date)} <span style="color:var(--text-muted)">(${daysLeft}d)</span></span>`
+        }
+      }
+      const usedQty = b.quantity_received - b.quantity_remaining
+      const pctUsed = b.quantity_received > 0 ? Math.round((usedQty / b.quantity_received) * 100) : 0
+      return `
+        <tr>
+          <td>${App.formatDate(b.delivery_date || b.received_at)}</td>
+          <td>${b.supplier_name || '—'}</td>
+          <td class="text-right">${Number(b.quantity_received).toFixed(1)}</td>
+          <td class="text-right">
+            ${Number(b.quantity_remaining).toFixed(1)}
+            <span style="color:var(--text-muted);font-size:11px">(${pctUsed}% used)</span>
+          </td>
+          <td>${expiryHtml}</td>
+          <td class="text-right">${b.cost_per_unit ? App.formatCurrency(b.cost_per_unit) : '—'}</td>
+        </tr>
+      `
+    }).join('') : `
+      <tr>
+        <td colspan="6" style="text-align:center;color:var(--text-muted);padding:16px;font-size:13px">
+          No batches yet. Batches are created when deliveries are recorded with expiry dates.
+        </td>
+      </tr>
+    `
+
+    const typeStyle = {
+      restock:    { color: 'var(--success)', label: 'Restock' },
+      sale:       { color: 'var(--danger)',  label: 'Sale' },
+      waste:      { color: '#f59e0b',        label: 'Waste' },
+      adjustment: { color: 'var(--accent)',  label: 'Adjustment' }
+    }
+
+    const movRows = movements.length ? movements.map(m => {
+      const s = typeStyle[m.type] || { color: 'inherit', label: m.type }
+      const sign = m.quantity_change >= 0 ? '+' : ''
+      return `
+        <tr>
+          <td style="font-size:12px;color:var(--text-muted)">${App.formatDateTime(m.created_at)}</td>
+          <td><span style="font-size:11px;font-weight:600;padding:2px 7px;border-radius:10px;background:${s.color}22;color:${s.color}">${s.label}</span></td>
+          <td class="text-right" style="color:${s.color};font-weight:700">${sign}${Number(m.quantity_change).toFixed(1)}</td>
+          <td class="text-right">${Number(m.quantity_after).toFixed(1)}</td>
+          <td style="font-size:12px">${m.note || '—'}</td>
+          <td style="font-size:12px;color:var(--text-muted)">${m.created_by || '—'}</td>
+        </tr>
+      `
+    }).join('') : `
+      <tr>
+        <td colspan="6" style="text-align:center;color:var(--text-muted);padding:16px;font-size:13px">
+          No movements yet. Stock changes from sales, deliveries, and waste will appear here.
+        </td>
+      </tr>
+    `
+
+    const body = `
+      <div style="margin-bottom:20px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <strong>Batches / Lots</strong>
+          <span style="font-size:12px;color:var(--text-muted)">${batches.length} batch${batches.length !== 1 ? 'es' : ''} recorded</span>
+        </div>
+        <div class="table-wrapper" style="max-height:200px;overflow-y:auto;margin-bottom:0">
+          <table>
+            <thead>
+              <tr>
+                <th>Received</th>
+                <th>Supplier</th>
+                <th class="text-right">Received</th>
+                <th class="text-right">Remaining</th>
+                <th>Expiry Date</th>
+                <th class="text-right">Unit Cost</th>
+              </tr>
+            </thead>
+            <tbody>${batchRows}</tbody>
+          </table>
+        </div>
+      </div>
+
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <strong>Stock Movement Log</strong>
+          <span style="font-size:12px;color:var(--text-muted)">${movements.length} movement${movements.length !== 1 ? 's' : ''} (last 100)</span>
+        </div>
+        <div class="table-wrapper" style="max-height:280px;overflow-y:auto;margin-bottom:0">
+          <table>
+            <thead>
+              <tr>
+                <th>Date / Time</th>
+                <th>Type</th>
+                <th class="text-right">Change</th>
+                <th class="text-right">Stock After</th>
+                <th>Note</th>
+                <th>By</th>
+              </tr>
+            </thead>
+            <tbody>${movRows}</tbody>
+          </table>
+        </div>
+      </div>
+    `
+
+    const footer = `
+      <button class="btn btn-secondary" onclick="App.closeModal()">Close</button>
+      <button class="btn btn-secondary" onclick="Inventory.showAdjustStockModal(${id})">Adjust Stock</button>
+    `
+    App.showModal(`${product.name} — History`, body, footer, { size: 'lg' })
+  },
+
+  async showAdjustStockModal(id) {
+    const product = Inventory.products.find(p => p.id === id)
+    if (!product) return
+
+    App.closeModal()
+
+    const body = `
+      <div style="margin-bottom:12px;color:var(--text-muted);font-size:13px">
+        Current stock: <strong>${Number(product.stock_quantity).toFixed(1)} ${product.unit}</strong>
+      </div>
+      <div class="form-group">
+        <label>New Stock Quantity *</label>
+        <input type="number" id="adj-qty" value="${Number(product.stock_quantity).toFixed(1)}" step="0.1" min="0" style="font-size:15px">
+      </div>
+      <div class="form-group">
+        <label>Reason / Note</label>
+        <input type="text" id="adj-note" placeholder="e.g. Stock count correction" maxlength="200">
+      </div>
+    `
+    const footer = `
+      <button class="btn btn-secondary" onclick="App.closeModal()">Cancel</button>
+      <button class="btn btn-primary" id="btn-save-adjustment">Save Adjustment</button>
+    `
+    App.showModal(`Adjust Stock — ${product.name}`, body, footer, { size: 'sm' })
+
+    document.getElementById('btn-save-adjustment').addEventListener('click', async () => {
+      const newQty = parseFloat(document.getElementById('adj-qty').value)
+      const note = document.getElementById('adj-note').value.trim()
+
+      if (isNaN(newQty) || newQty < 0) {
+        App.showToast('Enter a valid quantity', 'error')
+        return
+      }
+
+      const btn = document.getElementById('btn-save-adjustment')
+      btn.disabled = true
+      btn.textContent = 'Saving...'
+
+      const res = await window.api.products.adjustStock({ product_id: id, new_quantity: newQty, note })
+      if (res.success) {
+        App.closeModal()
+        App.showToast('Stock adjusted successfully', 'success')
+        await Inventory.render()
+      } else {
+        App.showToast(res.error || 'Failed to adjust stock', 'error')
+        btn.disabled = false
+        btn.textContent = 'Save Adjustment'
+      }
     })
   },
 

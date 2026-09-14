@@ -97,7 +97,9 @@ ipcMain.handle('auth:getCurrentUser', wrap(() => {
 // ─── Products ─────────────────────────────────────────────────────────────────
 ipcMain.handle('products:getAll', wrap(() => {
   const products = db.prepare(`
-    SELECT p.*, c.name AS category_name
+    SELECT p.*, c.name AS category_name,
+      (SELECT MIN(pb.expiry_date) FROM product_batches pb
+       WHERE pb.product_id = p.id AND pb.quantity_remaining > 0 AND pb.expiry_date IS NOT NULL) AS nearest_batch_expiry
     FROM products p
     LEFT JOIN categories c ON p.category_id = c.id
     ORDER BY p.name ASC
@@ -341,9 +343,9 @@ ipcMain.handle('deliveries:create', wrap((data) => {
       if (!product) throw new Error(`Product ${item.product_id} not found`)
 
       db.prepare(`
-        INSERT INTO delivery_items (delivery_id, product_id, product_name, quantity, unit_cost)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(deliveryId, item.product_id, product.name, item.quantity, item.unit_cost)
+        INSERT INTO delivery_items (delivery_id, product_id, product_name, quantity, unit_cost, expiry_date)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(deliveryId, item.product_id, product.name, item.quantity, item.unit_cost, item.expiry_date || null)
 
       db.prepare(`
         UPDATE products
@@ -352,6 +354,20 @@ ipcMain.handle('deliveries:create', wrap((data) => {
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `).run(item.quantity, item.unit_cost, item.product_id)
+
+      const newQty = db.prepare('SELECT stock_quantity FROM products WHERE id = ?').get(item.product_id).stock_quantity
+
+      if (item.expiry_date) {
+        db.prepare(`
+          INSERT INTO product_batches (product_id, delivery_id, quantity_received, quantity_remaining, expiry_date, cost_per_unit)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(item.product_id, deliveryId, item.quantity, item.quantity, item.expiry_date, item.unit_cost)
+      }
+
+      db.prepare(`
+        INSERT INTO stock_movements (product_id, product_name, type, quantity_change, quantity_after, reference_id, note, created_by)
+        VALUES (?, ?, 'restock', ?, ?, ?, ?, ?)
+      `).run(item.product_id, product.name, item.quantity, newQty, deliveryId, `Delivery #${deliveryId}`, currentUser ? currentUser.name : null)
     }
 
     return deliveryId
@@ -371,7 +387,8 @@ ipcMain.handle('deliveries:getById', wrap((id) => {
 
 // ─── Sales ────────────────────────────────────────────────────────────────────
 ipcMain.handle('sales:create', wrap((data) => {
-  const { cashier_id, cashier_name, subtotal, discount, total, payment_method, amount_paid, change_amount, notes, items } = data
+  const { cashier_id, cashier_name, subtotal, discount, total, payment_method, amount_paid, change_amount, notes, items,
+    order_type, customer_name, customer_phone, delivery_address, delivery_charge } = data
 
   if (!items || items.length === 0) {
     return { success: false, error: 'Sale must have at least one item.' }
@@ -379,9 +396,11 @@ ipcMain.handle('sales:create', wrap((data) => {
 
   const insertSale = db.transaction(() => {
     const result = db.prepare(`
-      INSERT INTO sales (cashier_id, cashier_name, subtotal, discount, total, payment_method, amount_paid, change_amount, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(cashier_id, cashier_name, subtotal, discount || 0, total, payment_method || 'cash', amount_paid || 0, change_amount || 0, notes || null)
+      INSERT INTO sales (cashier_id, cashier_name, subtotal, discount, total, payment_method, amount_paid, change_amount, notes,
+        order_type, customer_name, customer_phone, delivery_address, delivery_charge)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(cashier_id, cashier_name, subtotal, discount || 0, total, payment_method || 'cash', amount_paid || 0, change_amount || 0, notes || null,
+      order_type || 'walk-in', customer_name || null, customer_phone || null, delivery_address || null, delivery_charge || 0)
 
     const saleId = result.lastInsertRowid
 
@@ -397,6 +416,12 @@ ipcMain.handle('sales:create', wrap((data) => {
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `).run(item.quantity, item.product_id)
+
+      const newQty = db.prepare('SELECT stock_quantity FROM products WHERE id = ?').get(item.product_id).stock_quantity
+      db.prepare(`
+        INSERT INTO stock_movements (product_id, product_name, type, quantity_change, quantity_after, reference_id, created_by)
+        VALUES (?, ?, 'sale', ?, ?, ?, ?)
+      `).run(item.product_id, item.product_name, -item.quantity, newQty, saleId, cashier_name || null)
     }
 
     return saleId
@@ -551,6 +576,30 @@ ipcMain.handle('dashboard:getStats', wrap(() => {
       AND date(expiry_date) BETWEEN date('now','localtime') AND date('now','localtime','+30 days')
   `).get()
 
+  const batchExpiryAlerts = db.prepare(`
+    SELECT pb.id, pb.product_id, p.name AS product_name, p.unit,
+           pb.expiry_date, pb.quantity_remaining,
+           CAST(julianday(pb.expiry_date) - julianday('now','localtime') AS INTEGER) AS days_left
+    FROM product_batches pb
+    JOIN products p ON p.id = pb.product_id
+    WHERE pb.expiry_date IS NOT NULL AND pb.quantity_remaining > 0
+      AND date(pb.expiry_date) <= date('now','localtime','+30 days')
+    ORDER BY pb.expiry_date ASC
+    LIMIT 20
+  `).all()
+
+  const batchExpiredCount = db.prepare(`
+    SELECT COUNT(*) AS count FROM product_batches
+    WHERE expiry_date IS NOT NULL AND quantity_remaining > 0
+      AND date(expiry_date) < date('now','localtime')
+  `).get()
+
+  const batchExpiringSoonCount = db.prepare(`
+    SELECT COUNT(*) AS count FROM product_batches
+    WHERE expiry_date IS NOT NULL AND quantity_remaining > 0
+      AND date(expiry_date) BETWEEN date('now','localtime') AND date('now','localtime','+30 days')
+  `).get()
+
   const wasteThisMonth = db.prepare(`
     SELECT COALESCE(SUM(cost_value), 0) AS waste_value,
            COALESCE(SUM(quantity), 0) AS waste_qty,
@@ -591,6 +640,9 @@ ipcMain.handle('dashboard:getStats', wrap(() => {
       expired_count: expiredCount.expired_count,
       expiring_soon_count: expiringSoonCount.expiring_soon_count,
       expiry_alerts: expiryAlerts,
+      batch_expiry_alerts: batchExpiryAlerts,
+      batch_expired_count: batchExpiredCount.count,
+      batch_expiring_soon_count: batchExpiringSoonCount.count,
       waste_value: wasteThisMonth.waste_value,
       waste_entries: wasteThisMonth.waste_entries,
       top_products: topProducts,
@@ -712,6 +764,86 @@ ipcMain.handle('reports:getSalesReport', wrap(({ start, end }) => {
     ORDER BY total DESC
   `).all(start, end)
 
+  const salesByCategory = db.prepare(`
+    SELECT
+      COALESCE(c.name, 'Uncategorised') AS category,
+      SUM(si.quantity) AS total_qty,
+      COALESCE(SUM(si.total_price), 0) AS total_revenue,
+      COALESCE(SUM(si.purchase_price * si.quantity), 0) AS total_cost,
+      COALESCE(SUM(si.total_price - si.purchase_price * si.quantity), 0) AS total_profit
+    FROM sale_items si
+    JOIN sales s ON s.id = si.sale_id
+    JOIN products p ON p.id = si.product_id
+    LEFT JOIN categories c ON c.id = p.category_id
+    WHERE date(s.sale_date, 'localtime') BETWEEN date(?) AND date(?)
+    GROUP BY p.category_id
+    ORDER BY total_revenue DESC
+  `).all(start, end)
+
+  const topProducts = db.prepare(`
+    SELECT
+      si.product_name,
+      COALESCE(c.name, 'Uncategorised') AS category,
+      COALESCE(p.unit, 'pcs') AS unit,
+      COALESCE(SUM(si.quantity), 0) AS total_qty,
+      COALESCE(SUM(si.total_price), 0) AS total_revenue,
+      COALESCE(SUM(si.purchase_price * si.quantity), 0) AS total_cost,
+      COALESCE(SUM(si.total_price - si.purchase_price * si.quantity), 0) AS total_profit
+    FROM sale_items si
+    JOIN sales s ON s.id = si.sale_id
+    LEFT JOIN products p ON p.id = si.product_id
+    LEFT JOIN categories c ON c.id = p.category_id
+    WHERE date(s.sale_date, 'localtime') BETWEEN date(?) AND date(?)
+    GROUP BY si.product_id, si.product_name
+    ORDER BY total_revenue DESC
+    LIMIT 20
+  `).all(start, end)
+
+  const slowStock = db.prepare(`
+    SELECT
+      p.name,
+      p.sku,
+      COALESCE(c.name, 'Uncategorised') AS category,
+      p.stock_quantity,
+      p.unit,
+      p.selling_price,
+      ROUND(p.stock_quantity * p.purchase_price, 2) AS stock_value
+    FROM products p
+    LEFT JOIN categories c ON c.id = p.category_id
+    WHERE p.stock_quantity > 0
+      AND p.id NOT IN (
+        SELECT DISTINCT si.product_id
+        FROM sale_items si
+        JOIN sales s ON s.id = si.sale_id
+        WHERE si.product_id IS NOT NULL
+          AND date(s.sale_date, 'localtime') BETWEEN date(?) AND date(?)
+      )
+    ORDER BY stock_value DESC
+    LIMIT 30
+  `).all(start, end)
+
+  const hourlyPattern = db.prepare(`
+    SELECT
+      CAST(strftime('%H', s.sale_date, 'localtime') AS INTEGER) AS hour,
+      COUNT(*) AS transactions,
+      COALESCE(SUM(s.total), 0) AS revenue
+    FROM sales s
+    WHERE date(s.sale_date, 'localtime') BETWEEN date(?) AND date(?)
+    GROUP BY hour
+    ORDER BY hour
+  `).all(start, end)
+
+  const paymentSplit = db.prepare(`
+    SELECT
+      payment_method,
+      COUNT(*) AS count,
+      COALESCE(SUM(total), 0) AS total
+    FROM sales
+    WHERE date(sale_date, 'localtime') BETWEEN date(?) AND date(?)
+    GROUP BY payment_method
+    ORDER BY total DESC
+  `).all(start, end)
+
   return {
     success: true,
     daily,
@@ -720,7 +852,12 @@ ipcMain.handle('reports:getSalesReport', wrap(({ start, end }) => {
       total_expenses: expenseTotals.total_expenses,
       expense_count: expenseTotals.expense_count
     },
-    expensesByCategory
+    expensesByCategory,
+    salesByCategory,
+    topProducts,
+    slowStock,
+    hourlyPattern,
+    paymentSplit
   }
 }))
 
@@ -950,6 +1087,12 @@ ipcMain.handle('waste:log', wrap((data) => {
   db.prepare('UPDATE products SET stock_quantity = stock_quantity - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
     .run(quantity, product_id)
 
+  const newQty = db.prepare('SELECT stock_quantity FROM products WHERE id = ?').get(product_id).stock_quantity
+  db.prepare(`
+    INSERT INTO stock_movements (product_id, product_name, type, quantity_change, quantity_after, note, created_by)
+    VALUES (?, ?, 'waste', ?, ?, ?, ?)
+  `).run(product_id, product.name, -quantity, newQty, reason || 'Spoiled', loggedBy)
+
   return { success: true, cost_value }
 }))
 
@@ -961,6 +1104,44 @@ ipcMain.handle('waste:getAll', wrap(() => {
     ORDER BY w.logged_at DESC
   `).all()
   return { success: true, entries }
+}))
+
+// ─── Stock Movements ──────────────────────────────────────────────────────────
+ipcMain.handle('stockMovements:getByProduct', wrap((product_id) => {
+  const movements = db.prepare(`
+    SELECT * FROM stock_movements WHERE product_id = ? ORDER BY created_at DESC LIMIT 100
+  `).all(product_id)
+  return { success: true, movements }
+}))
+
+ipcMain.handle('products:adjustStock', wrap((data) => {
+  const { product_id, new_quantity, note } = data
+  const product = db.prepare('SELECT * FROM products WHERE id = ?').get(product_id)
+  if (!product) return { success: false, error: 'Product not found' }
+  if (new_quantity < 0) return { success: false, error: 'Quantity cannot be negative' }
+
+  const change = new_quantity - product.stock_quantity
+  const recordedBy = currentUser ? currentUser.name : null
+
+  db.prepare('UPDATE products SET stock_quantity = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(new_quantity, product_id)
+  db.prepare(`
+    INSERT INTO stock_movements (product_id, product_name, type, quantity_change, quantity_after, note, created_by)
+    VALUES (?, ?, 'adjustment', ?, ?, ?, ?)
+  `).run(product_id, product.name, change, new_quantity, note || 'Manual adjustment', recordedBy)
+
+  return { success: true }
+}))
+
+// ─── Batches ──────────────────────────────────────────────────────────────────
+ipcMain.handle('batches:getByProduct', wrap((product_id) => {
+  const batches = db.prepare(`
+    SELECT pb.*, d.delivery_date, d.supplier_name
+    FROM product_batches pb
+    LEFT JOIN deliveries d ON d.id = pb.delivery_id
+    WHERE pb.product_id = ?
+    ORDER BY pb.received_at DESC
+  `).all(product_id)
+  return { success: true, batches }
 }))
 
 // ─── Settings ─────────────────────────────────────────────────────────────────

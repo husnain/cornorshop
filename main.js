@@ -436,6 +436,40 @@ ipcMain.handle('sales:getByDate', wrap(({ start, end }) => {
   return { success: true, sales }
 }))
 
+ipcMain.handle('sales:search', wrap(({ query, startDate, endDate, page, pageSize }) => {
+  page = Math.max(1, parseInt(page) || 1)
+  pageSize = Math.min(100, Math.max(10, parseInt(pageSize) || 20))
+  const offset = (page - 1) * pageSize
+
+  const conditions = []
+  const params = []
+
+  if (query && query.trim()) {
+    const like = `%${query.trim()}%`
+    conditions.push('(CAST(s.id AS TEXT) LIKE ? OR s.cashier_name LIKE ? OR s.notes LIKE ? OR s.payment_method LIKE ?)')
+    params.push(like, like, like, like)
+  }
+  if (startDate) { conditions.push('date(s.sale_date) >= date(?)'); params.push(startDate) }
+  if (endDate)   { conditions.push('date(s.sale_date) <= date(?)'); params.push(endDate) }
+
+  const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''
+
+  const { cnt: total } = db.prepare(`
+    SELECT COUNT(*) AS cnt FROM sales s ${where}
+  `).get(...params)
+
+  const sales = db.prepare(`
+    SELECT s.*,
+      (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id = s.id) AS item_count
+    FROM sales s
+    ${where}
+    ORDER BY s.sale_date DESC
+    LIMIT ? OFFSET ?
+  `).all(...params, pageSize, offset)
+
+  return { success: true, sales, total, page, pageSize, totalPages: Math.ceil(total / pageSize) }
+}))
+
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 ipcMain.handle('dashboard:getStats', wrap(() => {
   const todayOpeningBalance = db.prepare(`

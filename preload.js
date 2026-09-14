@@ -41,7 +41,8 @@ contextBridge.exposeInMainWorld('api', {
     create: (data) => ipcRenderer.invoke('sales:create', data),
     getAll: () => ipcRenderer.invoke('sales:getAll'),
     getById: (id) => ipcRenderer.invoke('sales:getById', id),
-    getByDate: (data) => ipcRenderer.invoke('sales:getByDate', data)
+    getByDate: (data) => ipcRenderer.invoke('sales:getByDate', data),
+    search: (data) => ipcRenderer.invoke('sales:search', data)
   },
 
   dashboard: {

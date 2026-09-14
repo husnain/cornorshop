@@ -49,8 +49,9 @@ const App = {
   navigate(view) {
     if (!App.currentUser) return
 
-    // Role guard: cashiers can only access POS
-    if (App.currentUser.role === 'cashier' && view !== 'pos') {
+    // Role guard: cashiers can only access POS and orders
+    const cashierViews = ['pos', 'orders']
+    if (App.currentUser.role === 'cashier' && !cashierViews.includes(view)) {
       return
     }
 
@@ -70,6 +71,7 @@ const App = {
       dashboard: () => Dashboard.render(),
       inventory: () => Inventory.render(),
       pos: () => POS.render(),
+      orders: () => Orders.render(),
       deliveries: () => Deliveries.render(),
       'vendor-payments': () => VendorPayments.render(),
       expenses: () => Expenses.render(),
@@ -148,6 +150,7 @@ const App = {
     const allItems = [
       { view: 'dashboard', icon: '📊', label: 'Dashboard', ownerOnly: true },
       { view: 'pos', icon: '🛍️', label: 'Point of Sale', ownerOnly: false },
+      { view: 'orders', icon: '📋', label: 'Orders', ownerOnly: false },
       { view: 'inventory', icon: '📦', label: 'Inventory', ownerOnly: true },
       { view: 'deliveries', icon: '🚚', label: 'Deliveries', ownerOnly: true },
       { view: 'vendor-payments', icon: '💸', label: 'Vendor Payments', ownerOnly: true },

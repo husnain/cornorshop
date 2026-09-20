@@ -163,10 +163,42 @@ const Settings = {
           </button>
         </div>
       </div>
+
+      <div class="card settings-card">
+        <div class="settings-section">
+          <h3 class="settings-section-title">Backup &amp; Restore</h3>
+          <p class="settings-section-desc">Protect your data by saving a backup copy of the database, or restore from a previous backup.</p>
+
+          <div class="backup-actions">
+            <button class="btn btn-primary" id="backup-now-btn" onclick="Settings.backupNow()">
+              Backup Now
+            </button>
+            <button class="btn btn-danger" id="restore-btn" onclick="Settings.restoreBackup()" style="margin-left:0.75rem;">
+              Restore from Backup
+            </button>
+          </div>
+
+          <div id="backup-msg" class="alert" style="display:none; max-width:380px; margin-top:1rem;"></div>
+
+          <div class="settings-section-title" style="margin-top:1.5rem; font-size:0.95rem;">Auto-Backup on Launch</div>
+          <p class="settings-section-desc" style="margin-bottom:0.75rem;">Automatically save a backup each time the app starts. Keeps the last 5 copies.</p>
+
+          <label class="backup-toggle-label">
+            <input type="checkbox" id="auto-backup-toggle" onchange="Settings.toggleAutoBackup(this.checked)">
+            <span>Enable auto-backup</span>
+          </label>
+
+          <div id="recent-backups-section" style="display:none; margin-top:1.25rem;">
+            <div class="settings-section-desc" style="font-weight:600; margin-bottom:0.5rem; color:var(--text);">Recent Auto-Backups</div>
+            <div id="recent-backups-list" class="recent-backups-list"></div>
+          </div>
+        </div>
+      </div>
     `
 
     document.getElementById('currency-select').addEventListener('change', Settings.updatePreview)
     Settings.updatePreview()
+    Settings.loadBackupInfo()
   },
 
   updatePreview() {
@@ -267,5 +299,82 @@ const Settings = {
     App.showToast(`License activated! Valid for ${res.daysLeft} more days.`, 'success')
 
     Settings.render()
+  },
+
+  async loadBackupInfo() {
+    const res = await window.api.backup.getInfo()
+    if (!res.success) return
+
+    const toggle = document.getElementById('auto-backup-toggle')
+    if (toggle) toggle.checked = res.autoBackupEnabled
+
+    const section = document.getElementById('recent-backups-section')
+    const list = document.getElementById('recent-backups-list')
+    if (!section || !list) return
+
+    if (res.autoBackupEnabled && res.recentBackups.length > 0) {
+      section.style.display = 'block'
+      list.innerHTML = res.recentBackups.map(b => {
+        const d = new Date(b.date)
+        const label = d.toLocaleString('en', { dateStyle: 'medium', timeStyle: 'short' })
+        return `<div class="recent-backup-item">${label}</div>`
+      }).join('')
+    } else {
+      section.style.display = 'none'
+    }
+  },
+
+  async backupNow() {
+    const btn = document.getElementById('backup-now-btn')
+    const msg = document.getElementById('backup-msg')
+    msg.style.display = 'none'
+    btn.disabled = true
+    btn.textContent = 'Saving…'
+
+    const res = await window.api.backup.create()
+
+    btn.disabled = false
+    btn.textContent = 'Backup Now'
+
+    if (!res.success) {
+      if (res.error && res.error !== 'Cancelled') {
+        msg.className = 'alert alert-danger'
+        msg.textContent = `Backup failed: ${res.error}`
+        msg.style.display = 'block'
+      }
+      return
+    }
+
+    msg.className = 'alert alert-success'
+    msg.textContent = `Backup saved successfully.`
+    msg.style.display = 'block'
+  },
+
+  async restoreBackup() {
+    const btn = document.getElementById('restore-btn')
+    const msg = document.getElementById('backup-msg')
+    msg.style.display = 'none'
+    btn.disabled = true
+    btn.textContent = 'Restoring…'
+
+    const res = await window.api.backup.restore()
+
+    btn.disabled = false
+    btn.textContent = 'Restore from Backup'
+
+    if (!res.success) {
+      if (res.error && res.error !== 'Cancelled') {
+        msg.className = 'alert alert-danger'
+        msg.textContent = `Restore failed: ${res.error}`
+        msg.style.display = 'block'
+      }
+    }
+    // On success the window reloads — no further action needed
+  },
+
+  async toggleAutoBackup(enabled) {
+    await window.api.backup.setAutoBackup(enabled)
+    App.showToast(enabled ? 'Auto-backup enabled' : 'Auto-backup disabled', 'success')
+    Settings.loadBackupInfo()
   }
 }

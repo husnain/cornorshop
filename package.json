@@ -1,6 +1,6 @@
 {
   "name": "cornershop",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Desktop POS and inventory management for small grocery shops",
   "main": "main.js",
   "scripts": {

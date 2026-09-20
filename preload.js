@@ -109,5 +109,12 @@ contextBridge.exposeInMainWorld('api', {
     check: () => ipcRenderer.invoke('license:check'),
     importFile: () => ipcRenderer.invoke('license:importFile'),
     getMachineId: () => ipcRenderer.invoke('license:getMachineId')
+  },
+
+  backup: {
+    create: () => ipcRenderer.invoke('backup:create'),
+    restore: () => ipcRenderer.invoke('backup:restore'),
+    getInfo: () => ipcRenderer.invoke('backup:getInfo'),
+    setAutoBackup: (enabled) => ipcRenderer.invoke('backup:setAutoBackup', enabled)
   }
 })

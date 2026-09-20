@@ -2,6 +2,7 @@
 
 const { app, BrowserWindow, ipcMain, dialog } = require('electron')
 const path = require('path')
+const fs = require('fs')
 const bcrypt = require('bcryptjs')
 const { initDatabase } = require('./src/database/db')
 const { getMachineId, validateKey, checkTrial, decryptLicenseFile } = require('./src/license')
@@ -29,9 +30,38 @@ function createWindow() {
   mainWindow.setMenuBarVisibility(false)
 }
 
+function runAutoBackup() {
+  try {
+    const setting = db.prepare("SELECT value FROM settings WHERE key = 'auto_backup'").get()
+    if (!setting || setting.value !== '1') return
+
+    const userDataPath = app.getPath('userData')
+    const dbPath = path.join(userDataPath, 'cornershop.db')
+    const backupDir = path.join(userDataPath, 'backups')
+
+    if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true })
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    fs.copyFileSync(dbPath, path.join(backupDir, `cornershop-${timestamp}.db`))
+
+    // Keep only the 5 most recent auto-backups
+    const files = fs.readdirSync(backupDir)
+      .filter(f => f.startsWith('cornershop-') && f.endsWith('.db'))
+      .sort()
+    if (files.length > 5) {
+      files.slice(0, files.length - 5).forEach(f => {
+        try { fs.unlinkSync(path.join(backupDir, f)) } catch (_) {}
+      })
+    }
+  } catch (err) {
+    console.error('Auto-backup failed:', err.message)
+  }
+}
+
 app.whenReady().then(() => {
   const userDataPath = app.getPath('userData')
   db = initDatabase(path.join(userDataPath, 'cornershop.db'))
+  runAutoBackup()
   createWindow()
 
   // Check for updates in production only (not during dev/testing)
@@ -970,7 +1000,6 @@ ipcMain.handle('license:importFile', async () => {
 
   let license
   try {
-    const fs = require('fs')
     license = decryptLicenseFile(fs.readFileSync(filePaths[0]))
   } catch {
     return { success: false, error: 'Could not read license file' }
@@ -1168,7 +1197,6 @@ ipcMain.handle('reports:saveCSV', async (_event, { csv, defaultName }) => {
     filters: [{ name: 'CSV Files', extensions: ['csv'] }]
   })
   if (canceled || !filePath) return { success: false, error: 'Cancelled' }
-  const fs = require('fs')
   fs.writeFileSync(filePath, csv, 'utf-8')
   return { success: true, filePath }
 })
@@ -1177,8 +1205,6 @@ ipcMain.handle('reports:saveCSV', async (_event, { csv, defaultName }) => {
 ipcMain.handle('receipt:print', wrap((saleData) => {
   const { BrowserWindow } = require('electron')
   const os  = require('os')
-  const path = require('path')
-  const fs  = require('fs')
 
   const settingsRows = db.prepare('SELECT key, value FROM settings').all()
   const settings = {}
@@ -1310,5 +1336,80 @@ ipcMain.handle('receipt:print', wrap((saleData) => {
     }, 500)
   })
 
+  return { success: true }
+}))
+
+// ─── Backup & Restore ─────────────────────────────────────────────────────────
+ipcMain.handle('backup:create', async () => {
+  const dbPath = path.join(app.getPath('userData'), 'cornershop.db')
+  const today = new Date().toISOString().slice(0, 10)
+  const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+    title: 'Save Database Backup',
+    defaultPath: `cornershop-backup-${today}.db`,
+    filters: [{ name: 'CornerShop Backup', extensions: ['db'] }]
+  })
+  if (canceled || !filePath) return { success: false, error: 'Cancelled' }
+  try {
+    fs.copyFileSync(dbPath, filePath)
+    return { success: true, filePath }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle('backup:restore', async () => {
+  const { response } = await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    title: 'Restore from Backup',
+    message: 'Replace current data with a backup?',
+    detail: 'All data since the backup was made will be lost. The app will restart after restoring.',
+    buttons: ['Restore', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1
+  })
+  if (response !== 0) return { success: false, error: 'Cancelled' }
+
+  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select Backup File',
+    filters: [{ name: 'CornerShop Backup', extensions: ['db'] }],
+    properties: ['openFile']
+  })
+  if (canceled || !filePaths.length) return { success: false, error: 'Cancelled' }
+
+  const dbPath = path.join(app.getPath('userData'), 'cornershop.db')
+  try {
+    db.close()
+    fs.copyFileSync(filePaths[0], dbPath)
+    db = initDatabase(dbPath)
+    mainWindow.reload()
+    return { success: true }
+  } catch (err) {
+    try { db = initDatabase(dbPath) } catch (_) {}
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle('backup:getInfo', wrap(() => {
+  const setting = db.prepare("SELECT value FROM settings WHERE key = 'auto_backup'").get()
+  const backupDir = path.join(app.getPath('userData'), 'backups')
+  let recentBackups = []
+  if (fs.existsSync(backupDir)) {
+    const files = fs.readdirSync(backupDir)
+      .filter(f => f.startsWith('cornershop-') && f.endsWith('.db'))
+      .sort().reverse().slice(0, 5)
+    recentBackups = files.map(f => {
+      const stat = fs.statSync(path.join(backupDir, f))
+      return { name: f, date: stat.mtime.toISOString() }
+    })
+  }
+  return {
+    success: true,
+    autoBackupEnabled: setting ? setting.value === '1' : false,
+    recentBackups
+  }
+}))
+
+ipcMain.handle('backup:setAutoBackup', wrap((enabled) => {
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('auto_backup', ?)").run(enabled ? '1' : '0')
   return { success: true }
 }))

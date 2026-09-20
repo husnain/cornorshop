@@ -1488,3 +1488,39 @@ select { cursor: pointer; }
   border-left-color: #6f42c1;
   box-shadow: var(--shadow-sm);
 }
+
+/* ─── Backup & Restore ─────────────────────────────────────────────────────── */
+.backup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}
+.backup-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--text);
+  margin-top: 0.25rem;
+}
+.backup-toggle-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--primary);
+}
+.recent-backups-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.recent-backup-item {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  padding: 0.4rem 0.75rem;
+  background: var(--bg);
+  border: 1px solid #e0e8e0;
+  border-radius: 6px;
+}

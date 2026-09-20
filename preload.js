@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld('api', {
 
   deliveries: {
     getAll: () => ipcRenderer.invoke('deliveries:getAll'),
+    search: (data) => ipcRenderer.invoke('deliveries:search', data),
     create: (data) => ipcRenderer.invoke('deliveries:create', data),
     getById: (id) => ipcRenderer.invoke('deliveries:getById', id)
   },

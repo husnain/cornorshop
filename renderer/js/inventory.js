@@ -5,6 +5,8 @@ const Inventory = {
   categories: [],
   filterCategory: '',
   searchQuery: '',
+  _page: 1,
+  _pageSize: 25,
 
   async render() {
     const content = document.getElementById('content')
@@ -72,16 +74,19 @@ const Inventory = {
           </tbody>
         </table>
       </div>
+      <div id="inv-pagination" style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;flex-wrap:wrap;gap:8px"></div>
     `
 
     document.getElementById('btn-add-product').addEventListener('click', () => Inventory.showProductModal())
     document.getElementById('btn-import-csv').addEventListener('click', () => Inventory.showImportModal())
     document.getElementById('inv-search').addEventListener('input', (e) => {
       Inventory.searchQuery = e.target.value
+      Inventory._page = 1
       Inventory.renderTable()
     })
     document.getElementById('inv-cat-filter').addEventListener('change', (e) => {
       Inventory.filterCategory = e.target.value
+      Inventory._page = 1
       Inventory.renderTable()
     })
 
@@ -97,11 +102,11 @@ const Inventory = {
     const tbody = document.getElementById('inventory-tbody')
     if (!tbody) return
 
-    let products = Inventory.products
+    let filtered = Inventory.products
 
     if (Inventory.searchQuery) {
       const q = Inventory.searchQuery.toLowerCase()
-      products = products.filter(p =>
+      filtered = filtered.filter(p =>
         p.name.toLowerCase().includes(q) ||
         (p.sku && p.sku.toLowerCase().includes(q)) ||
         (p.barcode && p.barcode.toLowerCase().includes(q))
@@ -109,10 +114,18 @@ const Inventory = {
     }
 
     if (Inventory.filterCategory) {
-      products = products.filter(p => String(p.category_id) === String(Inventory.filterCategory))
+      filtered = filtered.filter(p => String(p.category_id) === String(Inventory.filterCategory))
     }
 
-    if (products.length === 0) {
+    // Update subtitle with filtered count
+    const subtitle = document.querySelector('.page-subtitle')
+    if (subtitle) {
+      subtitle.textContent = filtered.length === Inventory.products.length
+        ? `${Inventory.products.length} products`
+        : `${filtered.length} of ${Inventory.products.length} products`
+    }
+
+    if (filtered.length === 0) {
       tbody.innerHTML = `
         <tr>
           <td colspan="11" style="text-align:center;padding:40px;color:var(--text-muted)">
@@ -120,8 +133,16 @@ const Inventory = {
           </td>
         </tr>
       `
+      const paginationEl = document.getElementById('inv-pagination')
+      if (paginationEl) paginationEl.innerHTML = ''
       return
     }
+
+    const totalPages = Math.ceil(filtered.length / Inventory._pageSize)
+    if (Inventory._page > totalPages) Inventory._page = totalPages
+
+    const offset = (Inventory._page - 1) * Inventory._pageSize
+    const products = filtered.slice(offset, offset + Inventory._pageSize)
 
     tbody.innerHTML = products.map(p => {
       const isLow = p.stock_quantity <= p.low_stock_threshold
@@ -185,6 +206,61 @@ const Inventory = {
         </tr>
       `
     }).join('')
+
+    Inventory._renderPagination(filtered.length)
+  },
+
+  _renderPagination(total) {
+    const paginationEl = document.getElementById('inv-pagination')
+    if (!paginationEl) return
+
+    const totalPages = Math.ceil(total / Inventory._pageSize)
+
+    if (totalPages <= 1) {
+      paginationEl.innerHTML = total > 0
+        ? `<span style="font-size:13px;color:var(--text-muted)">${total} product${total !== 1 ? 's' : ''}</span>`
+        : ''
+      return
+    }
+
+    const page = Inventory._page
+    const start = (page - 1) * Inventory._pageSize + 1
+    const end = Math.min(page * Inventory._pageSize, total)
+    const pageButtons = Inventory._buildPageButtons(page, totalPages)
+
+    paginationEl.innerHTML = `
+      <span style="font-size:13px;color:var(--text-muted)">Showing ${start}–${end} of ${total} products</span>
+      <div style="display:flex;gap:4px;align-items:center">
+        <button class="btn btn-sm btn-secondary" onclick="Inventory._goPage(1)" ${page === 1 ? 'disabled' : ''}>«</button>
+        <button class="btn btn-sm btn-secondary" onclick="Inventory._goPage(${page - 1})" ${page === 1 ? 'disabled' : ''}>‹</button>
+        ${pageButtons}
+        <button class="btn btn-sm btn-secondary" onclick="Inventory._goPage(${page + 1})" ${page === totalPages ? 'disabled' : ''}>›</button>
+        <button class="btn btn-sm btn-secondary" onclick="Inventory._goPage(${totalPages})" ${page === totalPages ? 'disabled' : ''}>»</button>
+      </div>
+    `
+  },
+
+  _buildPageButtons(current, total) {
+    const pages = []
+    let prev = null
+    for (let p = 1; p <= total; p++) {
+      if (p === 1 || p === total || (p >= current - 2 && p <= current + 2)) {
+        if (prev !== null && p - prev > 1) pages.push('…')
+        pages.push(p)
+        prev = p
+      }
+    }
+    return pages.map(p => {
+      if (p === '…') return `<span style="padding:0 4px;color:var(--text-muted)">…</span>`
+      const active = p === current
+      return `<button class="btn btn-sm ${active ? 'btn-primary' : 'btn-secondary'}" onclick="Inventory._goPage(${p})" ${active ? 'disabled' : ''}>${p}</button>`
+    }).join('')
+  },
+
+  _goPage(p) {
+    Inventory._page = p
+    Inventory.renderTable()
+    document.getElementById('inventory-table')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   },
 
   async showProductModal(id = null) {

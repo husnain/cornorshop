@@ -1,29 +1,128 @@
 'use strict'
 
 const Deliveries = {
-  deliveries: [],
   suppliers: [],
   products: [],
+  _page: 1,
+  _pageSize: 20,
+  _query: '',
+  _startDate: '',
+  _endDate: '',
+  _debounceTimer: null,
 
   async render() {
     const content = document.getElementById('content')
+    content.innerHTML = '<div class="loading-wrapper"><div class="spinner"></div></div>'
 
-    const [delivRes, suppRes, prodRes] = await Promise.all([
-      window.api.deliveries.getAll(),
+    Deliveries._page = 1
+    Deliveries._query = ''
+    Deliveries._startDate = ''
+    Deliveries._endDate = ''
+
+    const [suppRes, prodRes] = await Promise.all([
       window.api.suppliers.getAll(),
       window.api.products.getAll()
     ])
 
-    if (!delivRes.success) {
-      content.innerHTML = `<div class="alert alert-danger">${delivRes.error}</div>`
-      return
-    }
-
-    Deliveries.deliveries = delivRes.deliveries
     Deliveries.suppliers = suppRes.suppliers || []
     Deliveries.products = prodRes.products || []
 
-    const rows = Deliveries.deliveries.map(d => `
+    content.innerHTML = `
+      <div class="page-header">
+        <div>
+          <div class="page-title">Deliveries</div>
+          <div class="page-subtitle" id="deliveries-subtitle">Loading…</div>
+        </div>
+        <button class="btn btn-primary" id="btn-add-delivery">+ Record Delivery</button>
+      </div>
+
+      <div class="card" style="margin-bottom:16px;padding:16px">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div style="flex:1;min-width:200px">
+            <label style="font-size:12px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:4px">Search</label>
+            <input type="search" id="del-search" placeholder="Supplier, delivery person, #ID…" style="width:100%">
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:4px">From</label>
+            <input type="date" id="del-date-start" style="width:150px">
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:4px">To</label>
+            <input type="date" id="del-date-end" style="width:150px">
+          </div>
+          <button class="btn btn-secondary btn-sm" id="del-clear-btn">Clear</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div id="deliveries-table-wrap"></div>
+        <div id="deliveries-pagination" style="display:flex;justify-content:space-between;align-items:center;padding:12px 0 4px;flex-wrap:wrap;gap:8px"></div>
+      </div>
+    `
+
+    document.getElementById('btn-add-delivery').addEventListener('click', () => Deliveries.showAddModal())
+
+    document.getElementById('del-search').addEventListener('input', (e) => {
+      clearTimeout(Deliveries._debounceTimer)
+      Deliveries._debounceTimer = setTimeout(() => {
+        Deliveries._query = e.target.value.trim()
+        Deliveries._page = 1
+        Deliveries._loadTable()
+      }, 300)
+    })
+
+    document.getElementById('del-date-start').addEventListener('change', (e) => {
+      Deliveries._startDate = e.target.value
+      Deliveries._page = 1
+      Deliveries._loadTable()
+    })
+
+    document.getElementById('del-date-end').addEventListener('change', (e) => {
+      Deliveries._endDate = e.target.value
+      Deliveries._page = 1
+      Deliveries._loadTable()
+    })
+
+    document.getElementById('del-clear-btn').addEventListener('click', () => {
+      Deliveries._query = ''
+      Deliveries._startDate = ''
+      Deliveries._endDate = ''
+      Deliveries._page = 1
+      document.getElementById('del-search').value = ''
+      document.getElementById('del-date-start').value = ''
+      document.getElementById('del-date-end').value = ''
+      Deliveries._loadTable()
+    })
+
+    await Deliveries._loadTable()
+  },
+
+  async _loadTable() {
+    const wrap = document.getElementById('deliveries-table-wrap')
+    const paginationEl = document.getElementById('deliveries-pagination')
+    if (!wrap) return
+
+    wrap.innerHTML = '<div style="padding:20px;text-align:center"><div class="spinner" style="margin:auto"></div></div>'
+
+    const res = await window.api.deliveries.search({
+      query: Deliveries._query || undefined,
+      startDate: Deliveries._startDate || undefined,
+      endDate: Deliveries._endDate || undefined,
+      page: Deliveries._page,
+      pageSize: Deliveries._pageSize
+    })
+
+    if (!res.success) {
+      wrap.innerHTML = `<div class="alert alert-danger" style="margin:16px">${res.error}</div>`
+      return
+    }
+
+    const { deliveries, total, page, totalPages } = res
+
+    const subtitle = document.getElementById('deliveries-subtitle')
+    if (subtitle) subtitle.textContent = `${total} total deliveries`
+
+    const rows = deliveries.length ? deliveries.map(d => `
       <tr>
         <td>${App.formatDate(d.delivery_date)}</td>
         <td>${d.supplier_name || '—'}</td>
@@ -35,44 +134,71 @@ const Deliveries = {
           <button class="btn btn-sm btn-secondary" onclick="Deliveries.viewDelivery(${d.id})">View</button>
         </td>
       </tr>
-    `).join('') || `
+    `).join('') : `
       <tr>
         <td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted)">
-          No deliveries recorded yet
+          No deliveries found
         </td>
       </tr>
     `
 
-    content.innerHTML = `
-      <div class="page-header">
-        <div>
-          <div class="page-title">Deliveries</div>
-          <div class="page-subtitle">${Deliveries.deliveries.length} total deliveries</div>
-        </div>
-        <button class="btn btn-primary" id="btn-add-delivery">+ Record Delivery</button>
-      </div>
-
-      <div class="table-wrapper">
-        <table>
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Supplier</th>
-              <th>Delivered By</th>
-              <th class="text-center">Items</th>
-              <th class="text-right">Total Cost</th>
-              <th>Recorded At</th>
-              <th class="text-center">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows}
-          </tbody>
-        </table>
-      </div>
+    wrap.innerHTML = `
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Supplier</th>
+            <th>Delivered By</th>
+            <th class="text-center">Items</th>
+            <th class="text-right">Total Cost</th>
+            <th>Recorded At</th>
+            <th class="text-center">Actions</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
     `
 
-    document.getElementById('btn-add-delivery').addEventListener('click', () => Deliveries.showAddModal())
+    if (!paginationEl) return
+    if (total === 0) { paginationEl.innerHTML = ''; return }
+
+    const start = (page - 1) * Deliveries._pageSize + 1
+    const end = Math.min(page * Deliveries._pageSize, total)
+    const pageButtons = Deliveries._buildPageButtons(page, totalPages)
+
+    paginationEl.innerHTML = `
+      <span style="font-size:13px;color:var(--text-muted)">Showing ${start}–${end} of ${total} deliveries</span>
+      <div style="display:flex;gap:4px;align-items:center">
+        <button class="btn btn-sm btn-secondary" onclick="Deliveries._goPage(1)" ${page === 1 ? 'disabled' : ''}>«</button>
+        <button class="btn btn-sm btn-secondary" onclick="Deliveries._goPage(${page - 1})" ${page === 1 ? 'disabled' : ''}>‹</button>
+        ${pageButtons}
+        <button class="btn btn-sm btn-secondary" onclick="Deliveries._goPage(${page + 1})" ${page === totalPages ? 'disabled' : ''}>›</button>
+        <button class="btn btn-sm btn-secondary" onclick="Deliveries._goPage(${totalPages})" ${page === totalPages ? 'disabled' : ''}>»</button>
+      </div>
+    `
+  },
+
+  _buildPageButtons(current, total) {
+    const pages = []
+    let prev = null
+    for (let p = 1; p <= total; p++) {
+      if (p === 1 || p === total || (p >= current - 2 && p <= current + 2)) {
+        if (prev !== null && p - prev > 1) pages.push('…')
+        pages.push(p)
+        prev = p
+      }
+    }
+    return pages.map(p => {
+      if (p === '…') return `<span style="padding:0 4px;color:var(--text-muted)">…</span>`
+      const active = p === current
+      return `<button class="btn btn-sm ${active ? 'btn-primary' : 'btn-secondary'}" onclick="Deliveries._goPage(${p})" ${active ? 'disabled' : ''}>${p}</button>`
+    }).join('')
+  },
+
+  async _goPage(p) {
+    Deliveries._page = p
+    await Deliveries._loadTable()
+    document.getElementById('deliveries-table-wrap')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   },
 
   async showAddModal() {

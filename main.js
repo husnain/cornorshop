@@ -415,6 +415,40 @@ ipcMain.handle('deliveries:getById', wrap((id) => {
   return { success: true, delivery: { ...delivery, items } }
 }))
 
+ipcMain.handle('deliveries:search', wrap(({ query, startDate, endDate, page, pageSize }) => {
+  page = Math.max(1, parseInt(page) || 1)
+  pageSize = Math.min(100, Math.max(10, parseInt(pageSize) || 20))
+  const offset = (page - 1) * pageSize
+
+  const conditions = []
+  const params = []
+
+  if (query && query.trim()) {
+    const like = `%${query.trim()}%`
+    conditions.push('(d.supplier_name LIKE ? OR d.delivered_by LIKE ? OR CAST(d.id AS TEXT) LIKE ?)')
+    params.push(like, like, like)
+  }
+  if (startDate) { conditions.push('date(d.delivery_date) >= date(?)'); params.push(startDate) }
+  if (endDate)   { conditions.push('date(d.delivery_date) <= date(?)'); params.push(endDate) }
+
+  const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''
+
+  const { cnt: total } = db.prepare(`
+    SELECT COUNT(*) AS cnt FROM deliveries d ${where}
+  `).get(...params)
+
+  const deliveries = db.prepare(`
+    SELECT d.*,
+      (SELECT COUNT(*) FROM delivery_items di WHERE di.delivery_id = d.id) AS item_count
+    FROM deliveries d
+    ${where}
+    ORDER BY d.delivery_date DESC, d.created_at DESC
+    LIMIT ? OFFSET ?
+  `).all(...params, pageSize, offset)
+
+  return { success: true, deliveries, total, page, pageSize, totalPages: Math.ceil(total / pageSize) }
+}))
+
 // ─── Sales ────────────────────────────────────────────────────────────────────
 ipcMain.handle('sales:create', wrap((data) => {
   const { cashier_id, cashier_name, subtotal, discount, total, payment_method, amount_paid, change_amount, notes, items,

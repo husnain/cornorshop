@@ -22,7 +22,8 @@
     "electron": "^29.1.0",
     "electron-builder": "^24.13.3",
     "electron-rebuild": "^3.2.9",
-    "javascript-obfuscator": "^4.2.2"
+    "javascript-obfuscator": "^4.2.2",
+    "playwright-core": "^1.63.0"
   },
   "repository": {
     "type": "git",
